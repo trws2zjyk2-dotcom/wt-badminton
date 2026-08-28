@@ -1,0 +1,105 @@
+<view class="container" wx:if="{{member}}">
+  <view class="card">
+    <view class="header-bar">
+      <view>
+        <view class="name" style="font-size:36rpx;font-weight:700">{{member.name}}</view>
+        <view class="meta">会员 ID: {{member.id}}</view>
+      </view>
+    </view>
+    <view class="detail-actions" style="display:flex;gap:12rpx;margin-top:16rpx;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" bindtap="onRechargeTap">充值</button>
+      <button class="btn btn-secondary btn-sm" bindtap="onEditTap">编辑</button>
+      <button class="btn btn-danger btn-sm" bindtap="onDeleteTap">删除</button>
+    </view>
+  </view>
+
+  <view class="summary-grid">
+    <view class="summary-card">
+      <view class="label">当前余额</view>
+      <view class="value green">{{member.balanceText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">会员价格表</view>
+      <view class="value" style="font-size:26rpx">{{member.priceTableLabel}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">累计消费</view>
+      <view class="value">{{member.consumeTotalText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">累计充值</view>
+      <view class="value">{{member.rechargeTotalText}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="modal-title" style="font-size:30rpx;margin-bottom:16rpx">会员清单</view>
+    <block wx:if="{{member.ledger.length}}">
+      <view wx:for="{{member.ledger}}" wx:key="id" class="income-row">
+        <view class="row-top">
+          <text>{{item.typeLabel}} · {{item.item}}</text>
+          <text class="amount">{{item.amountText}}</text>
+        </view>
+        <view class="row-meta">{{item.timeText}}</view>
+        <view style="display:flex;gap:12rpx;margin-top:12rpx">
+          <button wx:if="{{item.type === 'consume'}}" class="btn btn-secondary btn-sm" data-id="{{item.id}}" bindtap="onLedgerReceipt">发送清单</button>
+          <button class="btn btn-danger btn-sm" data-id="{{item.id}}" bindtap="onLedgerDelete">删除</button>
+        </view>
+      </view>
+    </block>
+    <view wx:else class="empty-state" style="padding:40rpx">暂无记录</view>
+  </view>
+</view>
+
+<view class="modal-mask" wx:if="{{showRechargeModal}}" bindtap="closeRechargeModal">
+  <view class="modal-panel" catchtap="stopBubble">
+    <view class="modal-title">会员充值</view>
+    <view class="form-info">会员：{{member.name}} · 当前余额 {{member.balanceText}}</view>
+    <view class="form-group">
+      <text class="form-label">充值金额（元）</text>
+      <input class="form-input" type="number" value="{{rechargeAmount}}" bindinput="onRechargeAmountInput" />
+    </view>
+    <view class="form-group">
+      <text class="form-label">充值项目</text>
+      <input class="form-input" value="{{rechargeItem}}" bindinput="onRechargeItemInput" />
+    </view>
+    <view class="modal-actions">
+      <button class="btn btn-secondary" bindtap="closeRechargeModal">取消</button>
+      <button class="btn btn-primary" bindtap="confirmRecharge">确认充值</button>
+    </view>
+  </view>
+</view>
+
+<view class="modal-mask" wx:if="{{showEditModal}}" bindtap="closeEditModal">
+  <view class="modal-panel" catchtap="stopBubble">
+    <view class="modal-title">编辑会员</view>
+    <view class="form-group">
+      <text class="form-label">会员名称</text>
+      <input class="form-input" value="{{editName}}" bindinput="onEditNameInput" />
+    </view>
+    <view class="form-group">
+      <text class="form-label">会员价格表</text>
+      <picker range="{{priceTableLabels}}" value="{{priceTableIndex}}" bindchange="onEditPriceTableChange">
+        <view class="form-input">{{editPriceTableLabel}}</view>
+      </picker>
+    </view>
+    <view class="modal-actions">
+      <button class="btn btn-secondary" bindtap="closeEditModal">取消</button>
+      <button class="btn btn-primary" bindtap="confirmEdit">保存</button>
+    </view>
+  </view>
+</view>
+
+<view class="modal-mask" wx:if="{{showReceiptModal}}" bindtap="closeReceiptModal">
+  <view class="modal-panel" catchtap="stopBubble">
+    <view class="modal-title">🏸 消费清单</view>
+    <view wx:for="{{receiptLines}}" wx:key="label" class="form-info" style="display:flex;justify-content:space-between;margin-bottom:8rpx">
+      <text>{{item.label}}</text>
+      <text class="receipt-value {{item.highlight ? 'highlight' : ''}}">{{item.value}}</text>
+    </view>
+    <view class="modal-actions">
+      <button class="btn btn-secondary" bindtap="copyReceipt">复制清单</button>
+      <button class="btn btn-primary" bindtap="closeReceiptModal">关闭</button>
+    </view>
+  </view>
+</view>

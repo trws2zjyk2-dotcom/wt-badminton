@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>羽毛球馆会员订场管理系统</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <h1>🏸 羽毛球馆管理系统</h1>
+        <p class="subtitle">会员充值 · 订场锁定 · 收入统计</p>
+      </div>
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="booking">每日订场表</button>
+        <button class="tab-btn" data-tab="prices">每日价格表</button>
+        <button class="tab-btn" data-tab="members">会员管理</button>
+        <button class="tab-btn" data-tab="income">每日收入统计</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- 订场表 -->
+      <section id="tab-booking" class="tab-panel active">
+        <div class="toolbar">
+          <label>
+            选择日期
+            <input type="date" id="booking-date" />
+          </label>
+          <span class="hours-badge" id="business-hours"></span>
+          <label class="holiday-toggle">
+            <input type="checkbox" id="holiday-toggle" />
+            标记为节假日（按周末营业时间 8:00 起）
+          </label>
+          <div class="legend">
+            <span class="legend-item"><span class="dot available"></span> 空闲</span>
+            <span class="legend-item"><span class="dot locked"></span> 会员锁定</span>
+            <span class="legend-item"><span class="dot walkin"></span> 现场订场</span>
+            <span class="legend-item"><span class="dot online"></span> 线上平台订场</span>
+            <span class="legend-item"><span class="dot closed"></span> 非营业</span>
+          </div>
+          <button class="btn btn-secondary" id="export-booking">导出当日订场</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="booking-table" id="booking-table">
+            <thead id="booking-thead"></thead>
+            <tbody id="booking-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 每日价格表（统一价格） -->
+      <section id="tab-prices" class="tab-panel">
+        <div class="toolbar">
+          <label>
+            选择日期
+            <input type="date" id="price-date" />
+          </label>
+          <span class="hours-badge" id="price-hours"></span>
+          <label class="holiday-toggle">
+            <input type="checkbox" id="price-holiday-toggle" />
+            标记为节假日
+          </label>
+          <p class="price-table-note">以下为统一价格表，会员订场时将自动与会员价格表对比取最低价</p>
+        </div>
+        <div class="table-wrapper">
+          <table class="booking-table price-grid" id="price-table">
+            <thead id="price-thead"></thead>
+            <tbody id="price-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 会员管理 -->
+      <section id="tab-members" class="tab-panel">
+        <div class="members-layout">
+          <div class="members-list-panel">
+            <div class="panel-header">
+              <h2>会员列表</h2>
+              <button class="btn btn-primary" id="add-member-btn">+ 新增会员</button>
+            </div>
+            <div class="search-box">
+              <input type="text" id="member-search" placeholder="搜索会员名称..." />
+            </div>
+            <ul class="member-list" id="member-list"></ul>
+          </div>
+          <div class="member-detail-panel" id="member-detail">
+            <div class="empty-state">← 请选择左侧会员查看详情</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 收入统计 -->
+      <section id="tab-income" class="tab-panel">
+        <div class="toolbar">
+          <label>
+            统计日期
+            <input type="date" id="income-date" />
+          </label>
+          <button class="btn btn-secondary" id="export-income">导出收入报表</button>
+        </div>
+        <div class="income-summary" id="income-summary"></div>
+        <div class="table-wrapper">
+          <table class="income-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>会员/客户</th>
+                <th>场地</th>
+                <th>时段</th>
+                <th>消费金额</th>
+                <th>类型</th>
+              </tr>
+            </thead>
+            <tbody id="income-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 订场弹窗 -->
+  <dialog id="booking-dialog" class="modal">
+    <form method="dialog" id="booking-form">
+      <h3>锁定场地</h3>
+      <div class="form-info" id="booking-info"></div>
+      <fieldset class="booking-type-fieldset">
+        <legend>订场方式</legend>
+        <label class="radio-label">
+          <input type="radio" name="booking-type" value="member" checked />
+          会员订场
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="booking-type" value="walkin" />
+          现场订场
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="booking-type" value="online" />
+          线上平台订场
+        </label>
+      </fieldset>
+      <div id="member-booking-fields">
+        <label>
+          输入会员名称
+          <input type="text" id="booking-member-name" list="member-datalist" placeholder="输入或选择会员名称" autocomplete="off" />
+          <datalist id="member-datalist"></datalist>
+        </label>
+        <div class="price-preview" id="booking-price-preview"></div>
+      </div>
+      <div id="walkin-booking-fields" class="hidden">
+        <label>
+          订场金额（元）
+          <input type="number" id="walkin-price" min="1" step="1" value="80" />
+        </label>
+        <fieldset class="booking-type-fieldset">
+          <legend>支付方式</legend>
+          <label class="radio-label">
+            <input type="radio" name="walkin-payment" value="cash" checked />
+            现金订场
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="walkin-payment" value="scan" />
+            扫码支付
+          </label>
+        </fieldset>
+      </div>
+      <div id="online-booking-fields" class="hidden">
+        <label>
+          订场金额（元）
+          <input type="number" id="online-price" min="1" step="1" value="80" />
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="booking-cancel">取消</button>
+        <button type="submit" class="btn btn-primary" id="booking-confirm">确认锁定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 取消锁定弹窗 -->
+  <dialog id="unlock-dialog" class="modal">
+    <form method="dialog" id="unlock-form">
+      <h3>取消锁定</h3>
+      <div class="form-info" id="unlock-info"></div>
+      <p class="warning-text" id="unlock-warning"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="unlock-cancel">关闭</button>
+        <button type="submit" class="btn btn-danger" id="unlock-confirm">确认取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 会员编辑弹窗 -->
+  <dialog id="member-dialog" class="modal">
+    <form method="dialog" id="member-form">
+      <h3 id="member-dialog-title">新增会员</h3>
+      <label>
+        会员名称
+        <input type="text" id="member-name" required maxlength="30" />
+      </label>
+      <label>
+        会员价格表
+        <select id="member-price-table" required>
+          <option value="A">会员价格表 A</option>
+          <option value="B">会员价格表 B</option>
+          <option value="C">会员价格表 C</option>
+          <option value="D">会员价格表 D</option>
+          <option value="E">会员价格表 E</option>
+        </select>
+      </label>
+      <label>
+        初始余额（元）
+        <input type="number" id="member-balance" min="0" step="1" value="0" />
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="member-cancel">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 充值弹窗 -->
+  <dialog id="recharge-dialog" class="modal">
+    <form method="dialog" id="recharge-form">
+      <h3>会员充值</h3>
+      <div class="form-info" id="recharge-member-name"></div>
+      <label>
+        充值金额（元）
+        <input type="number" id="recharge-amount" required min="1" step="1" />
+      </label>
+      <label>
+        充值项目
+        <input type="text" id="recharge-item" placeholder="如：储值卡充值、活动赠送" value="储值卡充值" />
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="recharge-cancel">取消</button>
+        <button type="submit" class="btn btn-primary">确认充值</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 会员消费清单（发送给会员） -->
+  <dialog id="receipt-dialog" class="modal receipt-modal">
+    <div class="receipt-content" id="receipt-content"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" id="receipt-copy">复制清单</button>
+      <button type="button" class="btn btn-primary" id="receipt-close">关闭</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="prices.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

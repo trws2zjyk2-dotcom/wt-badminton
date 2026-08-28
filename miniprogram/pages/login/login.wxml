@@ -1,0 +1,25 @@
+<view class="login-page">
+  <view class="login-header">
+    <text class="logo">🏸</text>
+    <text class="title">羽毛球馆管理系统</text>
+    <text class="subtitle">管理人员登录</text>
+  </view>
+
+  <view class="login-card">
+    <view class="form-group">
+      <text class="form-label">管理账号</text>
+      <input class="form-input" placeholder="请输入账号" value="{{username}}" bindinput="onUsernameInput" />
+    </view>
+    <view class="form-group">
+      <text class="form-label">登录密码</text>
+      <input class="form-input" password placeholder="请输入密码" value="{{password}}" bindinput="onPasswordInput" bindconfirm="onLogin" />
+    </view>
+    <button class="btn btn-primary login-btn" loading="{{loading}}" bindtap="onLogin">登 录</button>
+  </view>
+
+  <view class="login-tip">
+    <text>默认账号：admin / admin123</text>
+    <text>前台账号：manager / wt2024</text>
+    <text class="tip-note">正式部署前请在 utils/config.js 修改密码</text>
+  </view>
+</view>

@@ -1,0 +1,50 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/booking/booking",
+    "pages/prices/prices",
+    "pages/members/members",
+    "pages/income/income",
+    "pages/member-detail/member-detail"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#0ea5e9",
+    "navigationBarTitleText": "羽毛球馆管理",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f1f5f9"
+  },
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#0ea5e9",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/booking/booking",
+        "text": "订场",
+        "iconPath": "assets/tab/booking.png",
+        "selectedIconPath": "assets/tab/booking-active.png"
+      },
+      {
+        "pagePath": "pages/prices/prices",
+        "text": "价格",
+        "iconPath": "assets/tab/prices.png",
+        "selectedIconPath": "assets/tab/prices-active.png"
+      },
+      {
+        "pagePath": "pages/members/members",
+        "text": "会员",
+        "iconPath": "assets/tab/members.png",
+        "selectedIconPath": "assets/tab/members-active.png"
+      },
+      {
+        "pagePath": "pages/income/income",
+        "text": "收入",
+        "iconPath": "assets/tab/income.png",
+        "selectedIconPath": "assets/tab/income-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

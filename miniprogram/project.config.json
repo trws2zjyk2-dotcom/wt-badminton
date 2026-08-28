@@ -1,0 +1,6 @@
+{
+  "desc": "请在仓库根目录导入项目，根目录 project.config.json 已配置 miniprogramRoot",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "badminton-court-manager"
+}

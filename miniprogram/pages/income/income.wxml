@@ -1,0 +1,58 @@
+<view class="container">
+  <view class="card">
+    <view class="toolbar">
+      <picker mode="date" value="{{date}}" bindchange="onDateChange">
+        <view class="toolbar-row">
+          <text class="label-text">统计日期</text>
+          <text class="badge">{{date}}</text>
+        </view>
+      </picker>
+      <button class="btn btn-secondary btn-sm" bindtap="onCopyReport">复制报表</button>
+    </view>
+  </view>
+
+  <view class="summary-grid" wx:if="{{summary}}">
+    <view class="summary-card">
+      <view class="label">会员订场收入</view>
+      <view class="value">{{summary.memberBookingIncomeText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">现场订场（现金）</view>
+      <view class="value">{{summary.cashWalkinText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">现场订场（扫码）</view>
+      <view class="value">{{summary.scanWalkinText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">线上平台订场</view>
+      <view class="value">{{summary.onlineIncomeText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">充值收入</view>
+      <view class="value">{{summary.rechargeIncomeText}}</view>
+    </view>
+    <view class="summary-card">
+      <view class="label">已结算场次</view>
+      <view class="value">{{summary.bookingCount}} 场</view>
+    </view>
+    <view class="summary-card" style="grid-column: span 2">
+      <view class="label">当日总收入</view>
+      <view class="value green">{{summary.totalIncomeText}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="modal-title" style="font-size:30rpx;margin-bottom:16rpx">收入明细</view>
+    <block wx:if="{{rows.length}}">
+      <view wx:for="{{rows}}" wx:key="time" class="income-row">
+        <view class="row-top">
+          <text>{{item.type}}</text>
+          <text class="amount">{{item.amountText}}</text>
+        </view>
+        <view class="row-meta">{{item.timeText}} · {{item.member}} · {{item.court}} · {{item.slot}}</view>
+      </view>
+    </block>
+    <view wx:else class="empty-state" style="padding:40rpx">当日暂无收入记录</view>
+  </view>
+</view>

@@ -1,0 +1,129 @@
+<view class="container">
+  <view class="header-bar">
+    <text class="user-info">👤 {{sessionName}}</text>
+    <text class="logout-link" bindtap="onLogout">退出</text>
+  </view>
+
+  <view class="card">
+    <view class="toolbar">
+      <picker mode="date" value="{{date}}" bindchange="onDateChange">
+        <view class="toolbar-row">
+          <text class="label-text">选择日期</text>
+          <text class="badge">{{date}}</text>
+        </view>
+      </picker>
+      <text class="badge" wx:if="{{grid}}">{{grid.businessHours}}</text>
+    </view>
+    <view class="toolbar-row" wx:if="{{grid}}">
+      <switch checked="{{grid.isHoliday}}" bindchange="onHolidayChange" color="#0ea5e9" />
+      <text class="label-text">标记为节假日（按周末营业时间 8:00 起）</text>
+    </view>
+    <view class="legend">
+      <view class="legend-item"><view class="dot available"></view>空闲</view>
+      <view class="legend-item"><view class="dot locked"></view>会员锁定</view>
+      <view class="legend-item"><view class="dot walkin"></view>现场订场</view>
+      <view class="legend-item"><view class="dot online"></view>线上平台</view>
+      <view class="legend-item"><view class="dot closed"></view>非营业</view>
+    </view>
+  </view>
+
+  <scroll-view scroll-x class="table-scroll" wx:if="{{grid}}">
+    <view class="grid-table">
+      <view class="grid-row header">
+        <view class="grid-cell corner">场地/时间</view>
+        <view wx:for="{{grid.hours}}" wx:key="hour" class="grid-cell {{item.colClass}}">{{item.label}}</view>
+      </view>
+      <view wx:for="{{grid.courts}}" wx:key="id" wx:for-item="court" class="grid-row">
+        <view class="grid-cell court-name">{{court.name}}</view>
+        <view
+          wx:for="{{court.cells}}"
+          wx:key="hour"
+          wx:for-item="cell"
+          class="grid-cell {{cell.displayClass}}"
+          data-court-id="{{court.id}}"
+          data-hour="{{cell.hour}}"
+          data-status="{{cell.status}}"
+          bindtap="onCellTap"
+        >
+          <block wx:if="{{cell.status === 'booked'}}">
+            <text class="cell-name">{{cell.memberName}}</text>
+            <text class="cell-price">{{cell.priceText}}</text>
+            <text class="pending-tag" wx:if="{{cell.pending}}">待扣费</text>
+          </block>
+          <block wx:elif="{{cell.status === 'available'}}">
+            <text class="cell-hint">{{cell.priceHint}}</text>
+          </block>
+          <block wx:else>休息</block>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+</view>
+
+<!-- 订场弹窗 -->
+<view class="modal-mask" wx:if="{{showBookModal}}" bindtap="closeBookModal">
+  <view class="modal-panel" catchtap="stopBubble">
+    <view class="modal-title">锁定场地</view>
+    <view class="form-info"><text>{{bookingInfo}}</text></view>
+
+    <view class="form-group">
+      <text class="form-label">订场方式</text>
+      <radio-group class="radio-group" bindchange="onBookingTypeChange">
+        <label wx:for="{{bookingTypes}}" wx:key="value" class="radio-item">
+          <radio value="{{item.value}}" checked="{{bookingType === item.value}}" color="#0ea5e9" />{{item.label}}
+        </label>
+      </radio-group>
+    </view>
+
+    <block wx:if="{{bookingType === 'member'}}">
+      <view class="form-group">
+        <text class="form-label">会员名称</text>
+        <picker range="{{memberNames}}" bindchange="onMemberPick">
+          <view class="form-input" wx:if="{{memberNames.length}}">选择：{{memberNameHint}}</view>
+        </picker>
+        <input class="form-input" style="margin-top:12rpx" placeholder="或输入会员名称" value="{{memberName}}" bindinput="onMemberNameInput" />
+        <view class="price-preview {{pricePreviewClass}}"><text>{{pricePreview}}</text></view>
+      </view>
+    </block>
+
+    <block wx:if="{{bookingType === 'walkin'}}">
+      <view class="form-group">
+        <text class="form-label">订场金额（元）</text>
+        <input class="form-input" type="number" value="{{walkinPrice}}" bindinput="onWalkinPriceInput" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">支付方式</text>
+        <radio-group class="radio-group" bindchange="onWalkinPaymentChange">
+          <label wx:for="{{walkinPayments}}" wx:key="value" class="radio-item">
+            <radio value="{{item.value}}" checked="{{walkinPayment === item.value}}" color="#0ea5e9" />{{item.label}}
+          </label>
+        </radio-group>
+      </view>
+    </block>
+
+    <block wx:if="{{bookingType === 'online'}}">
+      <view class="form-group">
+        <text class="form-label">订场金额（元）</text>
+        <input class="form-input" type="number" value="{{onlinePrice}}" bindinput="onOnlinePriceInput" />
+      </view>
+    </block>
+
+    <view class="modal-actions">
+      <button class="btn btn-secondary" bindtap="closeBookModal">取消</button>
+      <button class="btn btn-primary" bindtap="confirmBooking">确认锁定</button>
+    </view>
+  </view>
+</view>
+
+<!-- 取消锁定弹窗 -->
+<view class="modal-mask" wx:if="{{showUnlockModal}}" bindtap="closeUnlockModal">
+  <view class="modal-panel" catchtap="stopBubble">
+    <view class="modal-title">取消锁定</view>
+    <view class="form-info"><text>{{unlockInfo}}</text></view>
+    <view class="warning-text">{{unlockWarning}}</view>
+    <view class="modal-actions">
+      <button class="btn btn-secondary" bindtap="closeUnlockModal">关闭</button>
+      <button class="btn btn-danger" bindtap="confirmUnlock">确认取消</button>
+    </view>
+  </view>
+</view>

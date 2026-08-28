@@ -1,0 +1,36 @@
+<view class="container">
+  <view class="card">
+    <view class="toolbar">
+      <picker mode="date" value="{{date}}" bindchange="onDateChange">
+        <view class="toolbar-row">
+          <text class="label-text">选择日期</text>
+          <text class="badge">{{date}}</text>
+        </view>
+      </picker>
+      <text class="badge" wx:if="{{grid}}">{{grid.businessHours}}</text>
+    </view>
+    <view class="toolbar-row" wx:if="{{grid}}">
+      <switch checked="{{grid.isHoliday}}" bindchange="onHolidayChange" color="#0ea5e9" />
+      <text class="label-text">标记为节假日</text>
+    </view>
+    <text class="label-text">以下为统一价格表，会员订场时将自动与会员价格表对比取最低价</text>
+  </view>
+
+  <scroll-view scroll-x class="table-scroll" wx:if="{{grid}}">
+    <view class="grid-table">
+      <view class="grid-row header">
+        <view class="grid-cell corner">场地/时间</view>
+        <view wx:for="{{grid.hours}}" wx:key="hour" class="grid-cell {{item.colClass}}">{{item.label}}</view>
+      </view>
+      <view wx:for="{{grid.courts}}" wx:key="id" wx:for-item="court" class="grid-row">
+        <view class="grid-cell court-name">{{court.name}}</view>
+        <view
+          wx:for="{{court.cells}}"
+          wx:key="hour"
+          wx:for-item="cell"
+          class="grid-cell {{cell.cellClass}}"
+        >{{cell.text}}</view>
+      </view>
+    </view>
+  </scroll-view>
+</view>

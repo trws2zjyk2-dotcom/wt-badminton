@@ -1,0 +1,7 @@
+.receipt-value {
+  font-weight: 700;
+}
+
+.receipt-value.highlight {
+  color: #0ea5e9;
+}
