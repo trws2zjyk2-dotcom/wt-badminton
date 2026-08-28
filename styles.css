@@ -420,11 +420,11 @@ body {
 }
 
 .court-cell.vip-row {
-  background: #faf5ff;
+  background: #ffffff;
 }
 
 .court-cell.vip-row.locked {
-  background: #fde68a;
+  background: #ffffff;
 }
 
 .court-cell.closed {
