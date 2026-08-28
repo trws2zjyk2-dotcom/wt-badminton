@@ -1,14 +1,7 @@
-# Windows
-[Dd]esktop.ini
-Thumbs.db
-$RECYCLE.BIN/
-
-# macOS
-.DS_Store
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-
-# Node.js
 node_modules/
+server/data.json
+.env
+deploy/ssl/*.pem
+.DS_Store
+docker-compose.run.yml
+docker-compose.tmp.yml

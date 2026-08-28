@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0ea5e9" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>羽毛球馆会员订场管理系统</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -13,12 +15,17 @@
         <h1>🏸 羽毛球馆管理系统</h1>
         <p class="subtitle">会员充值 · 订场锁定 · 收入统计</p>
       </div>
-      <nav class="nav-tabs">
+      <div class="header-right">
+        <span class="user-badge hidden" id="user-display"></span>
+        <button type="button" class="btn btn-secondary btn-sm hidden" id="import-local-btn" title="从本浏览器恢复之前保存的数据">恢复数据</button>
+        <button type="button" class="btn btn-secondary btn-sm hidden" id="logout-btn">退出登录</button>
+        <nav class="nav-tabs">
         <button class="tab-btn active" data-tab="booking">每日订场表</button>
         <button class="tab-btn" data-tab="prices">每日价格表</button>
         <button class="tab-btn" data-tab="members">会员管理</button>
         <button class="tab-btn" data-tab="income">每日收入统计</button>
-      </nav>
+        </nav>
+      </div>
     </header>
 
     <main>

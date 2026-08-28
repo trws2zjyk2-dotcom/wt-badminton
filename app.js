@@ -10,9 +10,22 @@ const ALL_HOURS = [];
 for (let h = 8; h < 23; h++) ALL_HOURS.push(h);
 
 const STORAGE_KEY = 'badminton_court_data';
+let USE_SERVER_API = false;
 
 // ========== 数据层 ==========
-function loadData() {
+async function loadData() {
+  if (USE_SERVER_API) {
+    const res = await fetch('/api/data', { credentials: 'include' });
+    if (res.status === 401) {
+      window.location.href = '/login.html';
+      return { members: [], bookings: [], holidays: [] };
+    }
+    if (!res.ok) throw new Error('加载数据失败');
+    const parsed = await res.json();
+    migrateData(parsed);
+    return parsed;
+  }
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -26,6 +39,8 @@ function loadData() {
 
 function migrateData(data) {
   if (!data.holidays) data.holidays = [];
+  if (!data.members) data.members = [];
+  if (!data.bookings) data.bookings = [];
   data.members.forEach((m) => {
     if (!m.priceTable) {
       m.priceTable = 'A';
@@ -45,8 +60,81 @@ function migrateData(data) {
   });
 }
 
-function saveData(data) {
+async function saveData(data) {
+  if (USE_SERVER_API) {
+    try {
+      const res = await fetch('/api/data', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
+      if (!res.ok) showToast('保存失败，请重试');
+    } catch {
+      showToast('网络错误，保存失败');
+    }
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function readLocalStorageData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    migrateData(parsed);
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function hasBusinessData(d) {
+  return d && (d.members.length > 0 || d.bookings.length > 0);
+}
+
+async function tryMigrateFromLocalStorage() {
+  if (!USE_SERVER_API) return false;
+  if (hasBusinessData(data)) return false;
+
+  const local = readLocalStorageData();
+  if (!hasBusinessData(local)) return false;
+
+  data = local;
+  await saveData(data);
+  showToast(`已从浏览器恢复 ${local.members.length} 位会员、${local.bookings.length} 条订场记录`);
+  return true;
+}
+
+async function importFromLocalStorage() {
+  const local = readLocalStorageData();
+  if (!hasBusinessData(local)) {
+    showToast('浏览器中未找到可导入的历史数据');
+    return false;
+  }
+
+  if (hasBusinessData(data)) {
+    if (!confirm(
+      `将用浏览器中的数据覆盖当前服务器数据：\n` +
+        `${local.members.length} 位会员、${local.bookings.length} 条订场\n\n确定导入？`
+    )) {
+      return false;
+    }
+  }
+
+  data = local;
+  await saveData(data);
+  renderBookingTable();
+  renderDailyPriceTable();
+  renderMemberList();
+  if (selectedMemberId) renderMemberDetail(selectedMemberId);
+  showToast('历史数据导入成功');
+  return true;
 }
 
 function generateId() {
@@ -118,7 +206,7 @@ function isSlotEnded(dateStr, startHour) {
 }
 
 // ========== 状态 ==========
-let data = loadData();
+let data = { members: [], bookings: [], holidays: [] };
 let selectedMemberId = null;
 let pendingBooking = null;
 let pendingUnlock = null;
@@ -1026,7 +1114,9 @@ function toggleHoliday(dateStr, isHol) {
 }
 
 // ========== 初始化示例数据 ==========
-function initSampleData() {
+async function initSampleData() {
+  // 服务器模式不自动添加示例数据，避免覆盖真实业务场景
+  if (USE_SERVER_API) return;
   if (data.members.length > 0) return;
   const samples = [
     { name: '张三', priceTable: 'A', balance: 500 },
@@ -1035,7 +1125,7 @@ function initSampleData() {
     { name: '赵六', priceTable: 'E', balance: 200 },
   ];
   samples.forEach((s) => addMember(s.name, s.priceTable, s.balance));
-  data = loadData();
+  data = await loadData();
 }
 
 // ========== 事件绑定 ==========
@@ -1203,7 +1293,6 @@ function initEvents() {
     }
     document.getElementById('member-dialog').close();
     renderMemberList(document.getElementById('member-search').value);
-    data = loadData();
   });
 
   document.getElementById('member-search').addEventListener('input', (e) => {
@@ -1239,11 +1328,73 @@ function initEvents() {
   document.getElementById('receipt-close').addEventListener('click', () => {
     document.getElementById('receipt-dialog').close();
   });
+
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      if (!confirm('确定退出登录？')) return;
+      try {
+        await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+      } catch (_) {}
+      window.location.href = '/login.html';
+    });
+  }
+
+  const importBtn = document.getElementById('import-local-btn');
+  if (importBtn) {
+    importBtn.addEventListener('click', () => importFromLocalStorage());
+  }
 }
 
 // ========== 启动 ==========
+async function detectServerMode() {
+  try {
+    const res = await fetch('/api/session', { credentials: 'include' });
+    if (res.ok || res.status === 401) return 'server';
+  } catch (_) {}
+  return 'static';
+}
+
+async function bootstrap() {
+  const mode = await detectServerMode();
+
+  if (mode === 'server') {
+    try {
+      const res = await fetch('/api/session', { credentials: 'include' });
+      if (!res.ok) {
+        window.location.href = '/login.html';
+        return;
+      }
+      const session = await res.json();
+      USE_SERVER_API = true;
+      const userEl = document.getElementById('user-display');
+      const logoutBtn = document.getElementById('logout-btn');
+      if (userEl) {
+        userEl.textContent = `👤 ${session.user.name}`;
+        userEl.classList.remove('hidden');
+      }
+      if (logoutBtn) logoutBtn.classList.remove('hidden');
+      const importBtn = document.getElementById('import-local-btn');
+      if (importBtn) importBtn.classList.remove('hidden');
+    } catch {
+      document.body.innerHTML =
+        '<div style="padding:40px;text-align:center;font-family:sans-serif"><h2>无法连接服务器</h2><p>请运行 <code>npm start</code> 后访问</p></div>';
+      return;
+    }
+  }
+
+  try {
+    data = await loadData();
+    await tryMigrateFromLocalStorage();
+    await initSampleData();
+    init();
+  } catch (err) {
+    console.error(err);
+    showToast('系统加载失败，请刷新页面重试');
+  }
+}
+
 function init() {
-  initSampleData();
   const today = todayStr();
   document.getElementById('booking-date').value = today;
   document.getElementById('price-date').value = today;
@@ -1262,4 +1413,4 @@ function init() {
   });
 }
 
-init();
+bootstrap();

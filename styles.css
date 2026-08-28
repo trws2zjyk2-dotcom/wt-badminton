@@ -48,6 +48,121 @@ body {
   box-shadow: var(--shadow);
 }
 
+.header-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-badge {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+}
+
+/* ========== 登录页 ========== */
+.login-body {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #0ea5e9 0%, #0369a1 100%);
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.login-header {
+  text-align: center;
+  color: #fff;
+  margin-bottom: 32px;
+}
+
+.login-logo {
+  font-size: 4rem;
+  margin-bottom: 12px;
+}
+
+.login-header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.login-header p {
+  margin-top: 8px;
+  opacity: 0.9;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 28px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.login-card input {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.login-submit {
+  width: 100%;
+  padding: 14px;
+  font-size: 1rem;
+  margin-top: 8px;
+}
+
+.login-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.login-tip {
+  margin-top: 32px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.85rem;
+  line-height: 1.8;
+}
+
+.login-tip-note {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
 .header h1 {
   font-size: 1.5rem;
   font-weight: 700;
@@ -794,7 +909,35 @@ body {
     align-items: flex-start;
   }
 
+  .header-right {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nav-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
+
+  .tab-btn {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    padding: 8px 14px;
+  }
+
   .legend {
     margin-left: 0;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .app {
+    padding: 12px 12px 32px;
   }
 }
