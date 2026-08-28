@@ -163,18 +163,29 @@ function deleteMember(id) {
   return { ok: true };
 }
 
-function rechargeMember(id, amount, item) {
+function rechargeMember(id, amount, item, bonus = 0) {
   const m = getMember(id);
   if (!m) return false;
-  const amt = Number(amount);
-  m.balance += amt;
+  const paid = Number(amount);
+  const gift = Number(bonus) || 0;
+  if (!paid || paid < 1) return false;
+  m.balance += paid + gift;
   m.ledger.unshift({
     id: generateId(),
     type: 'recharge',
     time: new Date().toISOString(),
     item: item || '储值卡充值',
-    amount: amt,
+    amount: paid,
   });
+  if (gift > 0) {
+    m.ledger.unshift({
+      id: generateId(),
+      type: 'recharge',
+      time: new Date().toISOString(),
+      item: '充值赠送',
+      amount: gift,
+    });
+  }
   saveData();
   return true;
 }
@@ -500,7 +511,8 @@ function getIncomeStats(date) {
         l.type === 'recharge' &&
         l.time.slice(0, 10) === date &&
         !l.item.includes('取消订场退款') &&
-        l.item !== '初始充值'
+        l.item !== '初始充值' &&
+        l.item !== '充值赠送'
       ) {
         dayRecharges.push(Object.assign({}, l, { memberName: m.name }));
       }

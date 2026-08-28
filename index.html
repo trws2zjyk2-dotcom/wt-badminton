@@ -233,6 +233,12 @@
     <form method="dialog" id="recharge-form">
       <h3>会员充值</h3>
       <div class="form-info" id="recharge-member-name"></div>
+      <div class="recharge-tiers">
+        <button type="button" class="recharge-tier-btn" data-pay="3000" data-bonus="300">充3000送300</button>
+        <button type="button" class="recharge-tier-btn" data-pay="5000" data-bonus="750">充5000送750</button>
+        <button type="button" class="recharge-tier-btn" data-pay="10000" data-bonus="2000">充10000送2000</button>
+      </div>
+      <div class="price-preview hidden" id="recharge-preview"></div>
       <label>
         充值金额（元）
         <input type="number" id="recharge-amount" required min="1" step="1" />

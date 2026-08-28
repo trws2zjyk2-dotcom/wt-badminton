@@ -21,6 +21,12 @@ const STORAGE_KEY = 'badminton_court_data';
 const SESSION_KEY = 'badminton_admin_session';
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000;
 
+const RECHARGE_TIERS = [
+  { pay: 3000, bonus: 300 },
+  { pay: 5000, bonus: 750 },
+  { pay: 10000, bonus: 2000 },
+];
+
 module.exports = {
   COURTS,
   ALL_HOURS,
@@ -28,4 +34,5 @@ module.exports = {
   STORAGE_KEY,
   SESSION_KEY,
   SESSION_DURATION,
+  RECHARGE_TIERS,
 };

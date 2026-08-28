@@ -55,6 +55,17 @@
   <view class="modal-panel" catchtap="stopBubble">
     <view class="modal-title">会员充值</view>
     <view class="form-info">会员：{{member.name}} · 当前余额 {{member.balanceText}}</view>
+    <view class="recharge-tiers">
+      <button
+        wx:for="{{rechargeTiers}}"
+        wx:key="pay"
+        class="recharge-tier-btn {{selectedRechargeTierPay === item.pay ? 'active' : ''}}"
+        data-pay="{{item.pay}}"
+        data-bonus="{{item.bonus}}"
+        bindtap="onRechargeTierTap"
+      >{{item.label}}</button>
+    </view>
+    <view class="recharge-preview" wx:if="{{rechargePreview}}">{{rechargePreview}}</view>
     <view class="form-group">
       <text class="form-label">充值金额（元）</text>
       <input class="form-input" type="number" value="{{rechargeAmount}}" bindinput="onRechargeAmountInput" />

@@ -9,6 +9,12 @@ const COURTS = [
 const ALL_HOURS = [];
 for (let h = 8; h < 23; h++) ALL_HOURS.push(h);
 
+const RECHARGE_TIERS = [
+  { pay: 3000, bonus: 300 },
+  { pay: 5000, bonus: 750 },
+  { pay: 10000, bonus: 2000 },
+];
+
 const STORAGE_KEY = 'badminton_court_data';
 let USE_SERVER_API = false;
 
@@ -212,6 +218,7 @@ let pendingBooking = null;
 let pendingUnlock = null;
 let editingMemberId = null;
 let rechargingMemberId = null;
+let selectedRechargeBonus = 0;
 let chargeCheckTimer = null;
 
 // ========== 工具 ==========
@@ -220,6 +227,59 @@ function showToast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function resetRechargeTierSelection() {
+  selectedRechargeBonus = 0;
+  document.querySelectorAll('.recharge-tier-btn').forEach((btn) => btn.classList.remove('active'));
+  const preview = document.getElementById('recharge-preview');
+  if (preview) {
+    preview.classList.add('hidden');
+    preview.textContent = '';
+  }
+}
+
+function updateRechargePreview() {
+  const amount = Number(document.getElementById('recharge-amount').value) || 0;
+  const preview = document.getElementById('recharge-preview');
+  if (!preview) return;
+  if (selectedRechargeBonus > 0 && amount > 0) {
+    preview.classList.remove('hidden');
+    preview.textContent = `实付 ${formatMoney(amount)}，赠送 ${formatMoney(selectedRechargeBonus)}，到账 ${formatMoney(amount + selectedRechargeBonus)}`;
+  } else {
+    preview.classList.add('hidden');
+    preview.textContent = '';
+  }
+}
+
+function applyRechargeTier(pay, bonus) {
+  document.getElementById('recharge-amount').value = pay;
+  document.getElementById('recharge-item').value = `储值卡充值（充${pay}送${bonus}）`;
+  selectedRechargeBonus = bonus;
+  document.querySelectorAll('.recharge-tier-btn').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.pay) === pay);
+  });
+  updateRechargePreview();
+}
+
+function syncRechargeTierFromAmount() {
+  const amount = Number(document.getElementById('recharge-amount').value);
+  const tier = RECHARGE_TIERS.find((t) => t.pay === amount);
+  if (tier) {
+    selectedRechargeBonus = tier.bonus;
+    document.getElementById('recharge-item').value = `储值卡充值（充${tier.pay}送${tier.bonus}）`;
+    document.querySelectorAll('.recharge-tier-btn').forEach((btn) => {
+      btn.classList.toggle('active', Number(btn.dataset.pay) === tier.pay);
+    });
+  } else {
+    selectedRechargeBonus = 0;
+    document.querySelectorAll('.recharge-tier-btn').forEach((btn) => btn.classList.remove('active'));
+    const item = document.getElementById('recharge-item').value;
+    if (item.startsWith('储值卡充值（充')) {
+      document.getElementById('recharge-item').value = '储值卡充值';
+    }
+  }
+  updateRechargePreview();
 }
 
 function getMember(id) {
@@ -284,18 +344,29 @@ function deleteMember(id) {
   return true;
 }
 
-function rechargeMember(id, amount, item) {
+function rechargeMember(id, amount, item, bonus = 0) {
   const m = getMember(id);
   if (!m) return false;
-  const amt = Number(amount);
-  m.balance += amt;
+  const paid = Number(amount);
+  const gift = Number(bonus) || 0;
+  if (!paid || paid < 1) return false;
+  m.balance += paid + gift;
   m.ledger.unshift({
     id: generateId(),
     type: 'recharge',
     time: new Date().toISOString(),
     item: item || '储值卡充值',
-    amount: amt,
+    amount: paid,
   });
+  if (gift > 0) {
+    m.ledger.unshift({
+      id: generateId(),
+      type: 'recharge',
+      time: new Date().toISOString(),
+      item: '充值赠送',
+      amount: gift,
+    });
+  }
   saveData(data);
   return true;
 }
@@ -833,6 +904,7 @@ function renderMemberDetail(id) {
     document.getElementById('recharge-member-name').innerHTML = `<strong>会员：</strong>${m.name} · 当前余额 ${formatMoney(m.balance)}`;
     document.getElementById('recharge-amount').value = '';
     document.getElementById('recharge-item').value = '储值卡充值';
+    resetRechargeTierSelection();
     document.getElementById('recharge-dialog').showModal();
   });
 
@@ -947,7 +1019,8 @@ function renderIncomeStats() {
         l.type === 'recharge' &&
         l.time.slice(0, 10) === date &&
         !l.item.includes('取消订场退款') &&
-        l.item !== '初始充值'
+        l.item !== '初始充值' &&
+        l.item !== '充值赠送'
       ) {
         dayRecharges.push({ ...l, memberName: m.name });
       }
@@ -1089,7 +1162,8 @@ function exportIncome() {
         l.type === 'recharge' &&
         l.time.slice(0, 10) === date &&
         !l.item.includes('取消订场退款') &&
-        l.item !== '初始充值'
+        l.item !== '初始充值' &&
+        l.item !== '充值赠送'
       ) {
         rows.push([formatDateTime(l.time), m.name, '-', '-', l.amount, '会员充值']);
       }
@@ -1303,15 +1377,29 @@ function initEvents() {
     document.getElementById('recharge-dialog').close();
   });
 
+  document.querySelectorAll('.recharge-tier-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyRechargeTier(Number(btn.dataset.pay), Number(btn.dataset.bonus));
+    });
+  });
+
+  document.getElementById('recharge-amount').addEventListener('input', syncRechargeTierFromAmount);
+
   document.getElementById('recharge-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const amount = document.getElementById('recharge-amount').value;
     const item = document.getElementById('recharge-item').value;
-    if (rechargeMember(rechargingMemberId, amount, item)) {
+    const bonus = selectedRechargeBonus;
+    if (rechargeMember(rechargingMemberId, amount, item, bonus)) {
       document.getElementById('recharge-dialog').close();
       renderMemberDetail(rechargingMemberId);
       renderMemberList(document.getElementById('member-search').value);
-      showToast(`充值成功 ${formatMoney(amount)}`);
+      const total = Number(amount) + bonus;
+      showToast(
+        bonus > 0
+          ? `充值成功，到账 ${formatMoney(total)}（含赠送 ${formatMoney(bonus)}）`
+          : `充值成功 ${formatMoney(amount)}`
+      );
     }
   });
 

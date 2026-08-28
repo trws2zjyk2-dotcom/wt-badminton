@@ -1,6 +1,7 @@
 const auth = require('../../utils/auth');
 const store = require('../../utils/store');
 const { getMemberPriceTableOptions } = require('../../utils/prices');
+const { RECHARGE_TIERS } = require('../../utils/config');
 
 Page({
   data: {
@@ -10,6 +11,13 @@ Page({
     showEditModal: false,
     showReceiptModal: false,
     rechargeAmount: '',
+    rechargeBonus: 0,
+    rechargePreview: '',
+    selectedRechargeTierPay: 0,
+    rechargeTiers: RECHARGE_TIERS.map((tier) => ({
+      ...tier,
+      label: `充${tier.pay}送${tier.bonus}`,
+    })),
     rechargeItem: '储值卡充值',
     editName: '',
     editPriceTable: 'A',
@@ -47,6 +55,9 @@ Page({
     this.setData({
       showRechargeModal: true,
       rechargeAmount: '',
+      rechargeBonus: 0,
+      rechargePreview: '',
+      selectedRechargeTierPay: 0,
       rechargeItem: '储值卡充值',
     });
   },
@@ -94,7 +105,37 @@ Page({
   },
 
   onRechargeAmountInput(e) {
-    this.setData({ rechargeAmount: e.detail.value });
+    const amount = Number(e.detail.value);
+    const tier = RECHARGE_TIERS.find((t) => t.pay === amount);
+    if (tier) {
+      this.setData({
+        rechargeAmount: e.detail.value,
+        rechargeBonus: tier.bonus,
+        selectedRechargeTierPay: tier.pay,
+        rechargeItem: `储值卡充值（充${tier.pay}送${tier.bonus}）`,
+        rechargePreview: `实付 ¥${tier.pay}，赠送 ¥${tier.bonus}，到账 ¥${tier.pay + tier.bonus}`,
+      });
+      return;
+    }
+    this.setData({
+      rechargeAmount: e.detail.value,
+      rechargeBonus: 0,
+      selectedRechargeTierPay: 0,
+      rechargeItem: this.data.rechargeItem.startsWith('储值卡充值（充') ? '储值卡充值' : this.data.rechargeItem,
+      rechargePreview: '',
+    });
+  },
+
+  onRechargeTierTap(e) {
+    const pay = Number(e.currentTarget.dataset.pay);
+    const bonus = Number(e.currentTarget.dataset.bonus);
+    this.setData({
+      rechargeAmount: String(pay),
+      rechargeBonus: bonus,
+      selectedRechargeTierPay: pay,
+      rechargeItem: `储值卡充值（充${pay}送${bonus}）`,
+      rechargePreview: `实付 ¥${pay}，赠送 ¥${bonus}，到账 ¥${pay + bonus}`,
+    });
   },
 
   onRechargeItemInput(e) {
@@ -117,14 +158,19 @@ Page({
 
   confirmRecharge() {
     const amount = Number(this.data.rechargeAmount);
+    const bonus = Number(this.data.rechargeBonus) || 0;
     if (!amount || amount < 1) {
       wx.showToast({ title: '请输入有效充值金额', icon: 'none' });
       return;
     }
-    if (store.rechargeMember(this.data.memberId, amount, this.data.rechargeItem)) {
+    if (store.rechargeMember(this.data.memberId, amount, this.data.rechargeItem, bonus)) {
       this.closeRechargeModal();
       this.refreshDetail();
-      wx.showToast({ title: `充值成功 ¥${amount}`, icon: 'success' });
+      const total = amount + bonus;
+      wx.showToast({
+        title: bonus > 0 ? `到账 ¥${total}` : `充值成功 ¥${amount}`,
+        icon: 'success',
+      });
     }
   },
 

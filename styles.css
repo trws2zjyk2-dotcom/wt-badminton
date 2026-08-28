@@ -865,6 +865,38 @@ body {
   color: #065f46;
 }
 
+.recharge-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.recharge-tier-btn {
+  flex: 1;
+  min-width: 110px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.recharge-tier-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.recharge-tier-btn.active {
+  background: #e0f2fe;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
 .warning-text {
   color: var(--danger);
   font-size: 0.85rem;
