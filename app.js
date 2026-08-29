@@ -15,6 +15,16 @@ const RECHARGE_TIERS = [
   { pay: 10000, bonus: 2000 },
 ];
 
+const WEEKDAYS = [
+  { id: 1, name: '周一' },
+  { id: 2, name: '周二' },
+  { id: 3, name: '周三' },
+  { id: 4, name: '周四' },
+  { id: 5, name: '周五' },
+  { id: 6, name: '周六' },
+  { id: 7, name: '周日' },
+];
+
 const STORAGE_KEY = 'badminton_court_data';
 let USE_SERVER_API = false;
 
@@ -47,6 +57,7 @@ function migrateData(data) {
   if (!data.holidays) data.holidays = [];
   if (!data.members) data.members = [];
   if (!data.bookings) data.bookings = [];
+  if (!data.fixedBookings) data.fixedBookings = [];
   data.members.forEach((m) => {
     if (!m.priceTable) {
       m.priceTable = 'A';
@@ -151,7 +162,9 @@ async function applyImportedData(imported) {
   await saveData(data);
   selectedMemberId = null;
   clearBookingSelection();
+  clearFixedBookingSelection();
   renderBookingTable();
+  renderFixedBookingTable();
   renderDailyPriceTable();
   renderMemberList();
   document.getElementById('member-detail').innerHTML =
@@ -171,6 +184,7 @@ function exportFullDataBackup() {
     members: data.members,
     bookings: data.bookings,
     holidays: data.holidays,
+    fixedBookings: data.fixedBookings,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -291,7 +305,7 @@ function isSlotEnded(dateStr, startHour) {
 }
 
 // ========== 状态 ==========
-let data = { members: [], bookings: [], holidays: [] };
+let data = { members: [], bookings: [], holidays: [], fixedBookings: [] };
 let selectedMemberId = null;
 let pendingBooking = null;
 let pendingUnlock = null;
@@ -300,6 +314,9 @@ let rechargingMemberId = null;
 let selectedRechargeBonus = 0;
 let chargeCheckTimer = null;
 let bookingSelection = null;
+let fixedBookingSelection = null;
+let currentFixedWeekday = 1;
+let pendingFixedBooking = null;
 
 // ========== 工具 ==========
 function showToast(msg) {
@@ -1047,6 +1064,315 @@ function showMemberReceipt(member, entry) {
   document.getElementById('receipt-dialog').showModal();
 }
 
+// ========== 固定场表 ==========
+function getWeekdayName(weekday) {
+  return WEEKDAYS.find((d) => d.id === weekday)?.name || `周${weekday}`;
+}
+
+function getReferenceDateForWeekday(weekday) {
+  const d = new Date();
+  const jsDay = weekday === 7 ? 0 : weekday;
+  let diff = jsDay - d.getDay();
+  if (diff <= 0) diff += 7;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function getActiveHoursForWeekday(weekday) {
+  const start = weekday >= 6 ? 8 : 9;
+  return ALL_HOURS.filter((h) => h >= start);
+}
+
+function getFixedBusinessHoursText(weekday) {
+  const start = weekday >= 6 ? 8 : 9;
+  const type = weekday >= 6 ? '周末' : '工作日';
+  return `${getWeekdayName(weekday)} · ${type}营业 ${String(start).padStart(2, '0')}:00-23:00`;
+}
+
+function getFixedBooking(weekday, courtId, startHour) {
+  return data.fixedBookings.find((b) => {
+    if (b.weekday !== weekday || b.courtId !== courtId) return false;
+    const span = getBookingSpan(b);
+    return startHour >= b.startHour && startHour < b.startHour + span;
+  });
+}
+
+function slotsAreAvailableFixed(weekday, courtId, startHour, spanHours = 1) {
+  for (let h = startHour; h < startHour + spanHours; h++) {
+    if (getFixedBooking(weekday, courtId, h)) return false;
+  }
+  return true;
+}
+
+function lockFixedMemberBooking(weekday, courtId, startHour, memberId, spanHours = 1) {
+  const member = getMember(memberId);
+  if (!member) return { ok: false, msg: '会员不存在' };
+  if (!slotsAreAvailableFixed(weekday, courtId, startHour, spanHours)) {
+    return { ok: false, msg: '所选时段中有已被锁定的格子' };
+  }
+
+  data.fixedBookings.push({
+    id: generateId(),
+    weekday,
+    courtId,
+    startHour,
+    spanHours,
+    memberId,
+    memberName: member.name,
+    lockedAt: new Date().toISOString(),
+  });
+  saveData(data);
+  return {
+    ok: true,
+    msg: `已锁定 ${getWeekdayName(weekday)} ${slotRangeLabel(startHour, spanHours)} · ${member.name}`,
+  };
+}
+
+function lockAllFixedMemberBookings(weekday, slotGroups, memberId) {
+  for (const group of slotGroups) {
+    if (!slotsAreAvailableFixed(weekday, group.courtId, group.startHour, group.spanHours)) {
+      return { ok: false, msg: '所选时段中有已被锁定的格子' };
+    }
+  }
+
+  for (const group of slotGroups) {
+    const result = lockFixedMemberBooking(
+      weekday,
+      group.courtId,
+      group.startHour,
+      memberId,
+      group.spanHours
+    );
+    if (!result.ok) return result;
+  }
+
+  return {
+    ok: true,
+    msg: `已锁定 ${slotGroups.length} 组固定场 · ${getWeekdayName(weekday)}`,
+  };
+}
+
+function unlockFixedBooking(weekday, courtId, startHour) {
+  const booking = getFixedBooking(weekday, courtId, startHour);
+  if (!booking) return { ok: false, msg: '固定场记录不存在' };
+  data.fixedBookings = data.fixedBookings.filter((b) => b.id !== booking.id);
+  saveData(data);
+  return { ok: true };
+}
+
+function isFixedHourSelected(weekday, courtId, hour) {
+  return (
+    fixedBookingSelection?.weekday === weekday &&
+    fixedBookingSelection.slots?.some((s) => s.courtId === courtId && s.hour === hour)
+  );
+}
+
+function clearFixedBookingSelection() {
+  fixedBookingSelection = null;
+  updateFixedBookingSelectionUI();
+}
+
+function toggleFixedBookingSelection(weekday, courtId, hour) {
+  if (!fixedBookingSelection || fixedBookingSelection.weekday !== weekday) {
+    fixedBookingSelection = { weekday, slots: [{ courtId, hour }] };
+    updateFixedBookingSelectionUI();
+    return;
+  }
+
+  const slots = [...fixedBookingSelection.slots];
+  const idx = slots.findIndex((s) => s.courtId === courtId && s.hour === hour);
+  if (idx >= 0) {
+    slots.splice(idx, 1);
+    fixedBookingSelection = slots.length ? { weekday, slots } : null;
+  } else {
+    slots.push({ courtId, hour });
+    fixedBookingSelection = { weekday, slots };
+  }
+  updateFixedBookingSelectionUI();
+}
+
+function getFixedSelectionSlotGroups() {
+  if (!fixedBookingSelection?.slots?.length) return null;
+  const slotGroups = groupSlotsIntoBookings(fixedBookingSelection.slots);
+  if (!slotGroups.length) return null;
+  return { weekday: fixedBookingSelection.weekday, slotGroups };
+}
+
+function updateFixedBookingSelectionUI() {
+  const sel = getFixedSelectionSlotGroups();
+  const lockBtn = document.getElementById('fixed-lock-selected-btn');
+  const clearBtn = document.getElementById('fixed-clear-selection-btn');
+  const hint = document.getElementById('fixed-selection-hint');
+  if (!lockBtn || !clearBtn || !hint) return;
+
+  if (sel) {
+    lockBtn.disabled = false;
+    clearBtn.disabled = false;
+    hint.textContent = `已选 ${fixedBookingSelection.slots.length} 格：${formatSelectionSummary(sel.slotGroups)}`;
+  } else {
+    lockBtn.disabled = true;
+    clearBtn.disabled = true;
+    hint.textContent = `当前：${getWeekdayName(currentFixedWeekday)} · 点击方格选择（可跨场地）`;
+  }
+
+  document.querySelectorAll('#fixed-booking-tbody .court-cell.selected-slot').forEach((cell) => {
+    cell.classList.remove('selected-slot');
+  });
+  if (fixedBookingSelection?.slots) {
+    fixedBookingSelection.slots.forEach(({ courtId, hour }) => {
+      const cell = document.querySelector(
+        `#fixed-booking-tbody .court-cell[data-action="book"][data-court="${courtId}"][data-hour="${hour}"]`
+      );
+      if (cell) cell.classList.add('selected-slot');
+    });
+  }
+}
+
+function openFixedBookingDialogFromSelection() {
+  const sel = getFixedSelectionSlotGroups();
+  if (!sel) {
+    showToast('请先选择要锁定的时段');
+    return;
+  }
+
+  pendingFixedBooking = {
+    weekday: sel.weekday,
+    slotGroups: sel.slotGroups,
+  };
+
+  document.getElementById('fixed-booking-info').innerHTML = `
+    <strong>星期：</strong>${getWeekdayName(sel.weekday)}<br>
+    <strong>已选场地：</strong>${formatSelectionSummary(sel.slotGroups)}<br>
+    <strong>共</strong> ${fixedBookingSelection.slots.length} 格
+  `;
+  renderMemberDatalist();
+  document.getElementById('fixed-booking-member-name').value = '';
+  document.getElementById('fixed-booking-dialog').showModal();
+}
+
+function renderFixedBookingTable() {
+  const weekday = currentFixedWeekday;
+  const activeHours = getActiveHoursForWeekday(weekday);
+  const refDate = getReferenceDateForWeekday(weekday);
+  const thead = document.getElementById('fixed-booking-thead');
+  const tbody = document.getElementById('fixed-booking-tbody');
+
+  document.getElementById('fixed-business-hours').textContent = getFixedBusinessHoursText(weekday);
+
+  thead.innerHTML = `
+    <tr>
+      <th>场地 \\ 时间</th>
+      ${ALL_HOURS.map((h) => {
+        const active = activeHours.includes(h);
+        return `<th class="${active ? '' : 'closed-col'}">${slotLabel(h)}</th>`;
+      }).join('')}
+    </tr>
+  `;
+
+  tbody.innerHTML = COURTS.map((court) => {
+    const cells = ALL_HOURS.map((h) => {
+      const isVip = court.type === 'vip';
+      const active = activeHours.includes(h);
+
+      if (!active) {
+        return `<td class="court-cell closed ${isVip ? 'vip-row' : ''}">休息</td>`;
+      }
+
+      const booking = getFixedBooking(weekday, court.id, h);
+      if (booking && h > booking.startHour) {
+        return '';
+      }
+
+      if (booking) {
+        const span = getBookingSpan(booking);
+        const slotText = span > 1 ? slotRangeLabel(booking.startHour, span) : '';
+        return `
+          <td class="court-cell locked merged-cell ${isVip ? 'vip-row' : ''}"
+              colspan="${span}"
+              data-weekday="${weekday}" data-court="${court.id}" data-hour="${booking.startHour}" data-action="unlock">
+            <div class="cell-content">
+              <span class="member-name">${booking.memberName}</span>
+              ${slotText ? `<span class="slot-tag">${slotText}</span>` : ''}
+            </div>
+          </td>`;
+      }
+
+      const selectedClass = isFixedHourSelected(weekday, court.id, h) ? ' selected-slot' : '';
+      const unified = getUnifiedPrice(court.id, refDate, h, isHolidayForPricing);
+      const priceHint = unified != null ? `<span class="price-hint">${unified}元</span>` : '';
+      return `
+        <td class="court-cell${isVip ? ' vip-row' : ''}${selectedClass}"
+            data-weekday="${weekday}" data-court="${court.id}" data-hour="${h}" data-action="book">
+          ${priceHint}
+        </td>`;
+    }).join('');
+    return `<tr><th>${court.name}</th>${cells}</tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('.court-cell[data-action]').forEach((cell) => {
+    cell.addEventListener('click', onFixedCourtCellClick);
+  });
+  updateFixedBookingSelectionUI();
+}
+
+function onFixedCourtCellClick(e) {
+  const cell = e.currentTarget;
+  const weekday = Number(cell.dataset.weekday);
+  const courtId = cell.dataset.court;
+  const startHour = Number(cell.dataset.hour);
+  const action = cell.dataset.action;
+  const court = COURTS.find((c) => c.id === courtId);
+
+  if (action === 'book') {
+    toggleFixedBookingSelection(weekday, courtId, startHour);
+    return;
+  }
+
+  const booking = getFixedBooking(weekday, courtId, startHour);
+  pendingUnlock = {
+    mode: 'fixed',
+    weekday,
+    courtId,
+    startHour: booking.startHour,
+  };
+  const span = getBookingSpan(booking);
+
+  document.getElementById('unlock-info').innerHTML = `
+    <strong>类型：</strong>固定场<br>
+    <strong>会员：</strong>${booking.memberName}<br>
+    <strong>星期：</strong>${getWeekdayName(weekday)}<br>
+    <strong>场地：</strong>${court.name} · ${slotRangeLabel(booking.startHour, span)}
+  `;
+  document.getElementById('unlock-warning').textContent = '取消后将移除该固定场安排';
+  document.getElementById('unlock-warning').style.display = '';
+  document.getElementById('unlock-dialog').showModal();
+}
+
+function exportMemberConsumeRecords(memberId) {
+  const m = getMember(memberId);
+  if (!m) return;
+  const rows = m.ledger
+    .filter((l) => l.type === 'consume')
+    .map((l) => [formatDateTime(l.time), l.item, l.amount]);
+  exportCSV(`${m.name}_消费明细.csv`, ['时间', '项目', '金额(元)'], rows);
+  showToast(rows.length ? '消费明细已导出' : '该会员暂无消费记录');
+}
+
+function exportAllMemberConsumeRecords() {
+  const headers = ['会员名称', '时间', '项目', '金额(元)'];
+  const rows = [];
+  data.members.forEach((m) => {
+    m.ledger
+      .filter((l) => l.type === 'consume')
+      .forEach((l) => {
+        rows.push([m.name, formatDateTime(l.time), l.item, l.amount]);
+      });
+  });
+  rows.sort((a, b) => new Date(b[1]) - new Date(a[1]));
+  exportCSV(`全部会员消费明细_${todayStr()}.csv`, headers, rows);
+  showToast(rows.length ? '全部会员消费明细已导出' : '暂无消费记录');
+}
+
 // ========== 渲染：订场表 ==========
 function renderBookingTable() {
   processDueCharges();
@@ -1134,7 +1460,7 @@ function onCourtCellClick(e) {
     toggleBookingSelection(date, courtId, startHour);
   } else {
     const booking = getBooking(date, courtId, startHour);
-    pendingUnlock = { date, courtId, startHour: booking.startHour };
+    pendingUnlock = { mode: 'daily', date, courtId, startHour: booking.startHour };
     const span = getBookingSpan(booking);
     const paymentInfo = booking.type === 'walkin'
       ? `（${booking.walkinPayment === 'cash' ? '现金' : '扫码'}支付）`
@@ -1296,6 +1622,7 @@ function renderMemberDetail(id) {
         <p style="color:#64748b;font-size:0.85rem;margin-top:4px">会员 ID: ${m.id}</p>
       </div>
       <div class="detail-actions">
+        <button class="btn btn-secondary btn-sm" id="export-member-consume-btn">导出消费明细</button>
         <button class="btn btn-primary btn-sm" id="recharge-btn">充值</button>
         <button class="btn btn-secondary btn-sm" id="edit-member-btn">编辑</button>
         <button class="btn btn-danger btn-sm" id="delete-member-btn">删除</button>
@@ -1343,6 +1670,10 @@ function renderMemberDetail(id) {
     document.getElementById('recharge-item').value = '储值卡充值';
     resetRechargeTierSelection();
     document.getElementById('recharge-dialog').showModal();
+  });
+
+  document.getElementById('export-member-consume-btn').addEventListener('click', () => {
+    exportMemberConsumeRecords(id);
   });
 
   document.getElementById('edit-member-btn').addEventListener('click', () => {
@@ -1650,6 +1981,7 @@ function initEvents() {
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
       if (btn.dataset.tab === 'income') renderIncomeStats();
       if (btn.dataset.tab === 'booking') renderBookingTable();
+      if (btn.dataset.tab === 'fixed') renderFixedBookingTable();
       if (btn.dataset.tab === 'prices') renderDailyPriceTable();
     });
   });
@@ -1694,6 +2026,56 @@ function initEvents() {
     clearBookingSelection();
     renderBookingTable();
   });
+
+  document.querySelectorAll('.weekday-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.weekday-tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentFixedWeekday = Number(tab.dataset.weekday);
+      clearFixedBookingSelection();
+      renderFixedBookingTable();
+    });
+  });
+
+  document.getElementById('fixed-lock-selected-btn').addEventListener('click', openFixedBookingDialogFromSelection);
+  document.getElementById('fixed-clear-selection-btn').addEventListener('click', () => {
+    clearFixedBookingSelection();
+    renderFixedBookingTable();
+  });
+
+  document.getElementById('fixed-booking-cancel').addEventListener('click', () => {
+    document.getElementById('fixed-booking-dialog').close();
+  });
+
+  document.getElementById('fixed-booking-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!pendingFixedBooking) {
+      showToast('请先选择要锁定的时段');
+      return;
+    }
+    const memberName = document.getElementById('fixed-booking-member-name').value;
+    const member = findMemberByName(memberName);
+    if (!member) {
+      showToast('未找到该会员，请检查名称或先添加会员');
+      return;
+    }
+    const result = lockAllFixedMemberBookings(
+      pendingFixedBooking.weekday,
+      pendingFixedBooking.slotGroups,
+      member.id
+    );
+    if (result.ok) {
+      document.getElementById('fixed-booking-dialog').close();
+      pendingFixedBooking = null;
+      clearFixedBookingSelection();
+      renderFixedBookingTable();
+      showToast(result.msg);
+    } else {
+      showToast(result.msg);
+    }
+  });
+
+  document.getElementById('export-all-consume-btn').addEventListener('click', exportAllMemberConsumeRecords);
 
   document.getElementById('booking-cancel').addEventListener('click', () => {
     document.getElementById('booking-dialog').close();
@@ -1759,7 +2141,24 @@ function initEvents() {
 
   document.getElementById('unlock-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    const result = unlockBooking(
+    let result;
+    if (pendingUnlock?.mode === 'fixed') {
+      result = unlockFixedBooking(
+        pendingUnlock.weekday,
+        pendingUnlock.courtId,
+        pendingUnlock.startHour
+      );
+      if (result.ok) {
+        document.getElementById('unlock-dialog').close();
+        renderFixedBookingTable();
+        showToast('已取消固定场锁定');
+      } else {
+        showToast(result.msg);
+      }
+      return;
+    }
+
+    result = unlockBooking(
       pendingUnlock.date,
       pendingUnlock.courtId,
       pendingUnlock.startHour
@@ -1940,6 +2339,7 @@ function init() {
   document.getElementById('income-date').value = today;
   initEvents();
   renderBookingTable();
+  renderFixedBookingTable();
   renderDailyPriceTable();
   renderMemberList();
 

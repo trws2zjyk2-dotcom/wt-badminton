@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0ea5e9" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>羽毛球馆会员订场管理系统</title>
-  <link rel="stylesheet" href="styles.css?v=20260329d" />
+  <link rel="stylesheet" href="styles.css?v=20260329e" />
 </head>
 <body>
   <div class="app">
@@ -26,6 +26,7 @@
         <button type="button" class="btn btn-secondary btn-sm hidden" id="logout-btn">退出登录</button>
         <nav class="nav-tabs">
         <button class="tab-btn active" data-tab="booking">每日订场表</button>
+        <button class="tab-btn" data-tab="fixed">固定场表</button>
         <button class="tab-btn" data-tab="prices">每日价格表</button>
         <button class="tab-btn" data-tab="members">会员管理</button>
         <button class="tab-btn" data-tab="income">每日收入统计</button>
@@ -66,6 +67,37 @@
         </div>
       </section>
 
+      <!-- 固定场表（周一至周日） -->
+      <section id="tab-fixed" class="tab-panel">
+        <div class="toolbar">
+          <div class="weekday-tabs" id="fixed-weekday-tabs">
+            <button type="button" class="weekday-tab active" data-weekday="1">周一</button>
+            <button type="button" class="weekday-tab" data-weekday="2">周二</button>
+            <button type="button" class="weekday-tab" data-weekday="3">周三</button>
+            <button type="button" class="weekday-tab" data-weekday="4">周四</button>
+            <button type="button" class="weekday-tab" data-weekday="5">周五</button>
+            <button type="button" class="weekday-tab" data-weekday="6">周六</button>
+            <button type="button" class="weekday-tab" data-weekday="7">周日</button>
+          </div>
+          <span class="hours-badge" id="fixed-business-hours"></span>
+          <div class="legend">
+            <span class="legend-item"><span class="dot available"></span> 空闲</span>
+            <span class="legend-item"><span class="dot locked"></span> 固定锁定</span>
+            <span class="legend-item"><span class="dot closed"></span> 非营业</span>
+          </div>
+          <button type="button" class="btn btn-primary" id="fixed-lock-selected-btn" disabled>锁定选中时段</button>
+          <button type="button" class="btn btn-secondary" id="fixed-clear-selection-btn" disabled>取消选择</button>
+          <span class="selection-hint" id="fixed-selection-hint"></span>
+        </div>
+        <p class="price-table-note">固定场表按星期设置会员固定场次，锁定前需选择会员名称，支持连续、跨场地选择。</p>
+        <div class="table-wrapper">
+          <table class="booking-table" id="fixed-booking-table">
+            <thead id="fixed-booking-thead"></thead>
+            <tbody id="fixed-booking-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- 每日价格表（统一价格） -->
       <section id="tab-prices" class="tab-panel">
         <div class="toolbar">
@@ -94,7 +126,10 @@
           <div class="members-list-panel">
             <div class="panel-header">
               <h2>会员列表</h2>
-              <button class="btn btn-primary" id="add-member-btn">+ 新增会员</button>
+              <div class="panel-header-actions">
+                <button class="btn btn-secondary btn-sm" id="export-all-consume-btn">导出全部消费明细</button>
+                <button class="btn btn-primary" id="add-member-btn">+ 新增会员</button>
+              </div>
             </div>
             <div class="search-box">
               <input type="text" id="member-search" placeholder="搜索会员名称..." />
@@ -198,6 +233,22 @@
     </form>
   </dialog>
 
+  <!-- 固定场锁定弹窗 -->
+  <dialog id="fixed-booking-dialog" class="modal">
+    <form method="dialog" id="fixed-booking-form">
+      <h3>锁定固定场</h3>
+      <div class="form-info" id="fixed-booking-info"></div>
+      <label>
+        会员名称
+        <input type="text" id="fixed-booking-member-name" list="member-datalist" placeholder="输入或选择会员名称" required autocomplete="off" />
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="fixed-booking-cancel">取消</button>
+        <button type="submit" class="btn btn-primary">确认锁定</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- 取消锁定弹窗 -->
   <dialog id="unlock-dialog" class="modal">
     <form method="dialog" id="unlock-form">
@@ -277,6 +328,6 @@
 
   <div id="toast" class="toast"></div>
   <script src="prices.js?v=20260329d"></script>
-  <script src="app.js?v=20260329d"></script>
+  <script src="app.js?v=20260330a"></script>
 </body>
 </html>

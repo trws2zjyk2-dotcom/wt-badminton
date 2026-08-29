@@ -1,13 +1,14 @@
 const fs = require('fs');
 const config = require('./config');
 
-const EMPTY_DATA = { members: [], bookings: [], holidays: [] };
+const EMPTY_DATA = { members: [], bookings: [], holidays: [], fixedBookings: [] };
 
 function normalizeData(data) {
   if (!data || typeof data !== 'object') return { ...EMPTY_DATA };
   if (!Array.isArray(data.members)) data.members = [];
   if (!Array.isArray(data.bookings)) data.bookings = [];
   if (!Array.isArray(data.holidays)) data.holidays = [];
+  if (!Array.isArray(data.fixedBookings)) data.fixedBookings = [];
   return data;
 }
 
