@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0ea5e9" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>羽毛球馆会员订场管理系统</title>
-  <link rel="stylesheet" href="styles.css?v=20260329" />
+  <link rel="stylesheet" href="styles.css?v=20260329d" />
 </head>
 <body>
   <div class="app">
@@ -17,6 +17,11 @@
       </div>
       <div class="header-right">
         <span class="user-badge hidden" id="user-display"></span>
+        <div class="header-data-tools">
+          <button type="button" class="btn btn-secondary btn-sm" id="export-data-btn" title="导出全部会员、订场与节假日数据">导出数据</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="import-data-btn" title="从备份文件恢复全部数据">导入数据</button>
+          <input type="file" id="import-data-file" accept=".json,application/json" class="hidden" />
+        </div>
         <button type="button" class="btn btn-secondary btn-sm hidden" id="import-local-btn" title="从本浏览器恢复之前保存的数据">恢复数据</button>
         <button type="button" class="btn btn-secondary btn-sm hidden" id="logout-btn">退出登录</button>
         <nav class="nav-tabs">
@@ -48,6 +53,9 @@
             <span class="legend-item"><span class="dot online"></span> 线上平台订场</span>
             <span class="legend-item"><span class="dot closed"></span> 非营业</span>
           </div>
+          <button type="button" class="btn btn-primary" id="lock-selected-btn" disabled>锁定选中时段</button>
+          <button class="btn btn-secondary" id="clear-selection-btn" disabled>取消选择</button>
+          <span class="selection-hint" id="selection-hint"></span>
           <button class="btn btn-secondary" id="export-booking">导出当日订场</button>
         </div>
         <div class="table-wrapper">
@@ -154,6 +162,10 @@
           <input type="text" id="booking-member-name" list="member-datalist" placeholder="输入或选择会员名称" autocomplete="off" />
           <datalist id="member-datalist"></datalist>
         </label>
+        <label>
+          订场金额（元）
+          <input type="number" id="member-booking-price" min="0" step="0.01" />
+        </label>
         <div class="price-preview" id="booking-price-preview"></div>
       </div>
       <div id="walkin-booking-fields" class="hidden">
@@ -219,7 +231,7 @@
       </label>
       <label>
         初始余额（元）
-        <input type="number" id="member-balance" min="0" step="1" value="0" />
+        <input type="number" id="member-balance" min="0" step="0.01" value="0.00" placeholder="0.00" />
       </label>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" id="member-cancel">取消</button>
@@ -264,7 +276,7 @@
   </dialog>
 
   <div id="toast" class="toast"></div>
-  <script src="prices.js?v=20260329"></script>
-  <script src="app.js?v=20260329"></script>
+  <script src="prices.js?v=20260329d"></script>
+  <script src="app.js?v=20260329d"></script>
 </body>
 </html>
