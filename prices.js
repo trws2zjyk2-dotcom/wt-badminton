@@ -8,6 +8,7 @@ const PRICE_TABLE_META = {
   C: { name: '会员价格表 C', schema: 'weekday_weekend' },
   D: { name: '会员价格表 D', schema: 'weekday_sat_sun' },
   E: { name: '会员价格表 E', schema: 'mon_tuefri_sat_sun' },
+  F: { name: '会员价格表 F', schema: 'weekday_weekend' },
 };
 
 // 时段规则：[开始小时, 结束小时, 价格] 左闭右开
@@ -106,6 +107,27 @@ const PRICE_DATA = {
       sun_holiday: [[8, 10, 68], [10, 12, 128], [12, 16, 88], [16, 18, 128], [18, 22, 88], [22, 23, 78]],
     },
   },
+  // 威腾羽毛球场馆价格明细表（A馆标准/VIP、B馆豪华场）
+  F: {
+    standard_a: {
+      weekday: [[9, 16, 35], [16, 18, 45], [18, 22, 90], [22, 23, 65]],
+      weekend: [[8, 10, 55], [10, 12, 90], [12, 14, 45], [14, 18, 90], [22, 23, 65]],
+      weekend_sat: { range: [18, 22], price: 90 },
+      weekend_sun: { range: [18, 22], price: 68 },
+    },
+    deluxe_b: {
+      weekday: [[9, 16, 35], [16, 18, 45], [18, 22, 100], [22, 23, 75]],
+      weekend: [[8, 10, 55], [10, 12, 100], [12, 14, 45], [14, 18, 100], [22, 23, 75]],
+      weekend_sat: { range: [18, 22], price: 100 },
+      weekend_sun: { range: [18, 22], price: 78 },
+    },
+    vip: {
+      weekday: [[9, 16, 68], [16, 18, 88], [18, 22, 120], [22, 23, 78]],
+      weekend: [[8, 10, 68], [10, 12, 120], [12, 14, 68], [14, 18, 120], [22, 23, 78]],
+      weekend_sat: { range: [18, 22], price: 120 },
+      weekend_sun: { range: [18, 22], price: 78 },
+    },
+  },
 };
 
 function getCourtCategory(courtId) {
@@ -200,5 +222,5 @@ function getPriceTableLabel(id) {
 }
 
 function getMemberPriceTableOptions() {
-  return ['A', 'B', 'C', 'D', 'E'].map((id) => ({ id, name: PRICE_TABLE_META[id].name }));
+  return ['A', 'B', 'C', 'D', 'E', 'F'].map((id) => ({ id, name: PRICE_TABLE_META[id].name }));
 }

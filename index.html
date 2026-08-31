@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0ea5e9" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>羽毛球馆会员订场管理系统</title>
-  <link rel="stylesheet" href="styles.css?v=20260329e" />
+  <link rel="stylesheet" href="styles.css?v=20260831" />
 </head>
 <body>
   <div class="app">
@@ -226,6 +226,10 @@
           <input type="number" id="online-price" min="1" step="1" value="80" />
         </label>
       </div>
+      <label>
+        备注（选填）
+        <input type="text" id="booking-note" maxlength="80" placeholder="如：固定客户、代订等" />
+      </label>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" id="booking-cancel">取消</button>
         <button type="submit" class="btn btn-primary" id="booking-confirm">确认锁定</button>
@@ -278,6 +282,7 @@
           <option value="C">会员价格表 C</option>
           <option value="D">会员价格表 D</option>
           <option value="E">会员价格表 E</option>
+          <option value="F">会员价格表 F</option>
         </select>
       </label>
       <label>
@@ -327,7 +332,7 @@
   </dialog>
 
   <div id="toast" class="toast"></div>
-  <script src="prices.js?v=20260329d"></script>
-  <script src="app.js?v=20260330a"></script>
+  <script src="prices.js?v=20260831"></script>
+  <script src="app.js?v=20260831b"></script>
 </body>
 </html>

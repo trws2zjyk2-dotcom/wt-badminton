@@ -236,6 +236,19 @@ function formatDateTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function formatBookingDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${y}-${m}-${d}`;
+}
+
+function formatBookingLedgerItem(booking, court, prefix = '订场') {
+  const slot = slotRangeLabel(booking.startHour, getBookingSpan(booking));
+  const base = `${prefix} ${formatBookingDate(booking.date)} ${court.name} ${slot}`;
+  const note = booking.note?.trim();
+  return note ? `${base}（${note}）` : base;
+}
+
 function formatMoney(n) {
   return `¥${Number(n).toFixed(2)}`;
 }
@@ -562,6 +575,7 @@ function openBookingDialogFromSelection() {
   renderMemberDatalist();
   document.getElementById('booking-member-name').value = '';
   document.getElementById('member-booking-price').value = '';
+  document.getElementById('booking-note').value = '';
   const defaultPrice = calcWalkinDefaultPrice(sel.date, sel.slotGroups);
   document.getElementById('walkin-price').value = defaultPrice.toFixed(2);
   document.getElementById('online-price').value = defaultPrice.toFixed(2);
@@ -618,7 +632,7 @@ function calcWalkinDefaultPrice(date, slotGroups) {
   return total;
 }
 
-function lockAllMemberBookings(date, slotGroups, memberId, customTotal) {
+function lockAllMemberBookings(date, slotGroups, memberId, customTotal, note) {
   const member = getMember(memberId);
   if (!member) return { ok: false, msg: '会员不存在' };
 
@@ -644,6 +658,7 @@ function lockAllMemberBookings(date, slotGroups, memberId, customTotal) {
     const result = lockMemberBooking(date, group.courtId, group.startHour, memberId, {
       spanHours: group.spanHours,
       customPrice: prices[i],
+      note,
     });
     if (!result.ok) return result;
   }
@@ -654,7 +669,7 @@ function lockAllMemberBookings(date, slotGroups, memberId, customTotal) {
   };
 }
 
-function lockAllWalkinBookings(date, slotGroups, totalPrice, payment) {
+function lockAllWalkinBookings(date, slotGroups, totalPrice, payment, note) {
   for (const group of slotGroups) {
     if (!slotsAreAvailable(date, group.courtId, group.startHour, group.spanHours)) {
       return { ok: false, msg: '所选时段中有已被锁定的格子' };
@@ -678,7 +693,8 @@ function lockAllWalkinBookings(date, slotGroups, totalPrice, payment) {
       group.startHour,
       prices[i],
       payment,
-      group.spanHours
+      group.spanHours,
+      note
     );
     if (!result.ok) return result;
   }
@@ -690,7 +706,7 @@ function lockAllWalkinBookings(date, slotGroups, totalPrice, payment) {
   };
 }
 
-function lockAllOnlineBookings(date, slotGroups, totalPrice) {
+function lockAllOnlineBookings(date, slotGroups, totalPrice, note) {
   for (const group of slotGroups) {
     if (!slotsAreAvailable(date, group.courtId, group.startHour, group.spanHours)) {
       return { ok: false, msg: '所选时段中有已被锁定的格子' };
@@ -708,7 +724,7 @@ function lockAllOnlineBookings(date, slotGroups, totalPrice) {
   const prices = splitCustomPrice(Number(totalPrice), defaults);
   for (let i = 0; i < slotGroups.length; i++) {
     const group = slotGroups[i];
-    const result = lockOnlineBooking(date, group.courtId, group.startHour, prices[i], group.spanHours);
+    const result = lockOnlineBooking(date, group.courtId, group.startHour, prices[i], group.spanHours, note);
     if (!result.ok) return result;
   }
 
@@ -852,6 +868,8 @@ function lockMemberBooking(date, courtId, startHour, memberId, options = {}) {
     return { ok: false, msg: '请输入有效的订场金额' };
   }
 
+  const note = options.note?.trim() || '';
+
   data.bookings.push({
     id: generateId(),
     type: 'member',
@@ -866,6 +884,7 @@ function lockMemberBooking(date, courtId, startHour, memberId, options = {}) {
     unifiedPrice: pricing.unifiedPrice,
     priceSource: pricing.source,
     priceTable: member.priceTable,
+    note,
     lockedAt: new Date().toISOString(),
     charged: false,
     chargedAt: null,
@@ -885,7 +904,7 @@ function lockMemberBooking(date, courtId, startHour, memberId, options = {}) {
   };
 }
 
-function lockWalkinBooking(date, courtId, startHour, price, payment, spanHours = 1) {
+function lockWalkinBooking(date, courtId, startHour, price, payment, spanHours = 1, note = '') {
   if (!slotsAreAvailable(date, courtId, startHour, spanHours)) {
     return { ok: false, msg: '所选时段中有已被锁定的格子' };
   }
@@ -904,6 +923,7 @@ function lockWalkinBooking(date, courtId, startHour, price, payment, spanHours =
     memberName: `现场（${paymentLabel}）`,
     walkinPayment: payment,
     price: Number(price),
+    note: note?.trim() || '',
     lockedAt: now,
     charged: true,
     chargedAt: now,
@@ -917,7 +937,7 @@ function lockWalkinBooking(date, courtId, startHour, price, payment, spanHours =
   };
 }
 
-function lockOnlineBooking(date, courtId, startHour, price, spanHours = 1) {
+function lockOnlineBooking(date, courtId, startHour, price, spanHours = 1, note = '') {
   if (!slotsAreAvailable(date, courtId, startHour, spanHours)) {
     return { ok: false, msg: '所选时段中有已被锁定的格子' };
   }
@@ -934,6 +954,7 @@ function lockOnlineBooking(date, courtId, startHour, price, spanHours = 1) {
     memberId: null,
     memberName: '线上平台',
     price: Number(price),
+    note: note?.trim() || '',
     lockedAt: now,
     charged: true,
     chargedAt: now,
@@ -964,7 +985,7 @@ function chargeBooking(booking) {
   }
 
   const court = COURTS.find((c) => c.id === booking.courtId);
-  const item = `订场 ${court.name} ${slotRangeLabel(booking.startHour, getBookingSpan(booking))}`;
+  const item = formatBookingLedgerItem(booking, court);
   const now = new Date().toISOString();
 
   member.balance -= booking.price;
@@ -1021,7 +1042,7 @@ function unlockBooking(date, courtId, startHour) {
         id: generateId(),
         type: 'recharge',
         time: new Date().toISOString(),
-        item: `取消订场退款 ${court.name} ${slotRangeLabel(booking.startHour, getBookingSpan(booking))}`,
+        item: formatBookingLedgerItem(booking, court, '取消订场退款'),
         amount: booking.price,
       });
       const key = getBookingKey(date, courtId, startHour);
@@ -1416,6 +1437,9 @@ function renderBookingTable() {
         const pending = booking.type === 'member' && !booking.charged;
         const extra = pending ? '<span class="pending-tag">待扣费</span>' : '';
         const slotText = span > 1 ? slotRangeLabel(booking.startHour, span) : '';
+        const noteText = booking.note?.trim()
+          ? `<span class="note-tag">${booking.note.trim()}</span>`
+          : '';
         return `
           <td class="court-cell locked merged-cell ${isWalkin ? 'walkin-cell' : ''} ${isOnline ? 'online-cell' : ''} ${isVip ? 'vip-row' : ''}"
               colspan="${span}"
@@ -1423,6 +1447,7 @@ function renderBookingTable() {
             <div class="cell-content">
               <span class="member-name">${booking.memberName}</span>
               ${slotText ? `<span class="slot-tag">${slotText}</span>` : ''}
+              ${noteText}
               <span class="price-tag">${formatMoney(booking.price)}</span>
               ${extra}
             </div>
@@ -1475,8 +1500,10 @@ function onCourtCellClick(e) {
 
     document.getElementById('unlock-info').innerHTML = `
       <strong>客户：</strong>${booking.memberName}<br>
+      <strong>日期：</strong>${formatBookingDate(booking.date)}<br>
       <strong>场地：</strong>${court.name} · ${slotRangeLabel(booking.startHour, span)}<br>
       <strong>费用：</strong>${formatMoney(booking.price)} ${paymentInfo}${priceDetail}
+      ${booking.note?.trim() ? `<br><strong>备注：</strong>${booking.note.trim()}` : ''}
     `;
 
     const warn = document.getElementById('unlock-warning');
@@ -2089,6 +2116,7 @@ function initEvents() {
     }
     const type = document.querySelector('input[name="booking-type"]:checked').value;
     const slotGroups = getPendingSlotGroups();
+    const note = document.getElementById('booking-note').value;
     let result;
 
     if (type === 'member') {
@@ -2099,7 +2127,7 @@ function initEvents() {
         return;
       }
       const customPrice = document.getElementById('member-booking-price').value;
-      result = lockAllMemberBookings(pendingBooking.date, slotGroups, member.id, customPrice);
+      result = lockAllMemberBookings(pendingBooking.date, slotGroups, member.id, customPrice, note);
       if (result.ok) {
         document.getElementById('booking-dialog').close();
         clearBookingSelection();
@@ -2112,7 +2140,7 @@ function initEvents() {
     } else if (type === 'walkin') {
       const price = document.getElementById('walkin-price').value;
       const payment = document.querySelector('input[name="walkin-payment"]:checked').value;
-      result = lockAllWalkinBookings(pendingBooking.date, slotGroups, price, payment);
+      result = lockAllWalkinBookings(pendingBooking.date, slotGroups, price, payment, note);
       if (result.ok) {
         document.getElementById('booking-dialog').close();
         clearBookingSelection();
@@ -2123,7 +2151,7 @@ function initEvents() {
       }
     } else {
       const price = document.getElementById('online-price').value;
-      result = lockAllOnlineBookings(pendingBooking.date, slotGroups, price);
+      result = lockAllOnlineBookings(pendingBooking.date, slotGroups, price, note);
       if (result.ok) {
         document.getElementById('booking-dialog').close();
         clearBookingSelection();
