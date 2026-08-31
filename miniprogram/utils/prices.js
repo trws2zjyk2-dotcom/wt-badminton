@@ -203,9 +203,21 @@ function getMemberTablePrice(priceTable, courtId, dateStr, startHour, isHolidayF
   return getTablePrice(priceTable, courtId, dateStr, startHour, isHolidayFn);
 }
 
+const MEMBER_TABLES_UNIFIED_ONLY_ON_B = ['A', 'B', 'C', 'D'];
+
+function memberUsesUnifiedOnlyOnCourt(member, courtId) {
+  return MEMBER_TABLES_UNIFIED_ONLY_ON_B.includes(member.priceTable) && courtId.startsWith('B');
+}
+
 function calcMemberBookingPrice(member, courtId, dateStr, startHour, isHolidayFn) {
-  const memberPrice = getMemberTablePrice(member.priceTable, courtId, dateStr, startHour, isHolidayFn);
   const unifiedPrice = getUnifiedPrice(courtId, dateStr, startHour, isHolidayFn);
+
+  if (memberUsesUnifiedOnlyOnCourt(member, courtId)) {
+    if (unifiedPrice == null) return null;
+    return { final: unifiedPrice, memberPrice: null, unifiedPrice, source: 'unified' };
+  }
+
+  const memberPrice = getMemberTablePrice(member.priceTable, courtId, dateStr, startHour, isHolidayFn);
 
   if (memberPrice == null && unifiedPrice == null) return null;
   if (memberPrice == null) return { final: unifiedPrice, memberPrice: null, unifiedPrice, source: 'unified' };

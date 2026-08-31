@@ -485,7 +485,8 @@ body {
 }
 
 .court-cell.vip-row.locked:not(.walkin-cell):not(.online-cell) {
-  background: #faf5ff;
+  background: var(--locked);
+  border-color: var(--locked-border);
 }
 
 .court-cell.vip-row.selected-slot {

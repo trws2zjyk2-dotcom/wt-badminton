@@ -587,18 +587,27 @@ function calcMemberBookingTotal(member, courtId, date, startHour, spanHours = 1)
   let totalFinal = 0;
   let totalMember = 0;
   let totalUnified = 0;
+  let hasMemberPrice = false;
   for (let h = startHour; h < startHour + spanHours; h++) {
     const pricing = calcPriceForMember(member, courtId, date, h);
     if (!pricing || pricing.final == null) return null;
     totalFinal += pricing.final;
-    totalMember += pricing.memberPrice;
-    totalUnified += pricing.unifiedPrice;
+    if (pricing.memberPrice != null) {
+      hasMemberPrice = true;
+      totalMember += pricing.memberPrice;
+    }
+    totalUnified += pricing.unifiedPrice ?? 0;
   }
   return {
     final: totalFinal,
-    memberPrice: totalMember,
+    memberPrice: hasMemberPrice ? totalMember : null,
     unifiedPrice: totalUnified,
-    source: totalFinal === totalMember ? 'member' : totalFinal === totalUnified ? 'unified' : 'same',
+    source:
+      !hasMemberPrice || totalFinal === totalUnified
+        ? 'unified'
+        : totalFinal === totalMember
+          ? 'member'
+          : 'same',
   };
 }
 
@@ -606,18 +615,27 @@ function calcSlotGroupsMemberTotal(member, date, slotGroups) {
   let totalFinal = 0;
   let totalMember = 0;
   let totalUnified = 0;
+  let hasMemberPrice = false;
   for (const group of slotGroups) {
     const pricing = calcMemberBookingTotal(member, group.courtId, date, group.startHour, group.spanHours);
     if (!pricing) return null;
     totalFinal += pricing.final;
-    totalMember += pricing.memberPrice;
-    totalUnified += pricing.unifiedPrice;
+    if (pricing.memberPrice != null) {
+      hasMemberPrice = true;
+      totalMember += pricing.memberPrice;
+    }
+    totalUnified += pricing.unifiedPrice ?? 0;
   }
   return {
     final: totalFinal,
-    memberPrice: totalMember,
+    memberPrice: hasMemberPrice ? totalMember : null,
     unifiedPrice: totalUnified,
-    source: totalFinal === totalMember ? 'member' : totalFinal === totalUnified ? 'unified' : 'same',
+    source:
+      !hasMemberPrice || totalFinal === totalUnified
+        ? 'unified'
+        : totalFinal === totalMember
+          ? 'member'
+          : 'same',
   };
 }
 
@@ -1566,16 +1584,24 @@ function updateBookingPricePreview() {
     const customPrice = Number(priceInput.value);
     const chargePrice = Number.isFinite(customPrice) ? customPrice : pricing.final;
     const enough = member.balance >= chargePrice;
+    const bOnlyUnified =
+      ['A', 'B', 'C', 'D'].includes(member.priceTable) &&
+      slotGroups.every((g) => g.courtId.startsWith('B'));
     const sourceText =
-      pricing.source === 'member'
-        ? `会员价合计 ${formatMoney(pricing.memberPrice)} 更低`
-        : pricing.source === 'unified'
-          ? `统一价合计 ${formatMoney(pricing.unifiedPrice)} 更低`
-          : `会员价与统一价合计均为 ${formatMoney(pricing.final)}`;
+      bOnlyUnified
+        ? 'B馆场地按统一价结算'
+        : pricing.source === 'member'
+          ? `会员价合计 ${formatMoney(pricing.memberPrice)} 更低`
+          : pricing.source === 'unified'
+            ? `统一价合计 ${formatMoney(pricing.unifiedPrice)} 更低`
+            : `会员价与统一价合计均为 ${formatMoney(pricing.final)}`;
+    const memberPriceLine =
+      pricing.memberPrice != null
+        ? `会员价合计：<strong>${formatMoney(pricing.memberPrice)}</strong> · `
+        : '';
     el.innerHTML = `
       已选：<strong>${formatSelectionSummary(slotGroups)}</strong><br>
-      会员价合计：<strong>${formatMoney(pricing.memberPrice)}</strong> ·
-      统一价合计：<strong>${formatMoney(pricing.unifiedPrice)}</strong><br>
+      ${memberPriceLine}统一价合计：<strong>${formatMoney(pricing.unifiedPrice)}</strong><br>
       参考合计：<strong>${formatMoney(pricing.final)}</strong>（${sourceText}）<br>
       时段结束后从余额扣除，当前余额：<strong>${formatBalance(member.balance)}</strong>
       ${enough ? '' : '<br><span style="color:#ef4444">⚠ 余额可能不足，请提醒会员充值</span>'}`;
