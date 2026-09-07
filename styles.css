@@ -853,6 +853,10 @@ body {
   color: var(--success);
 }
 
+.ledger-table .type-refund {
+  color: #0d9488;
+}
+
 .ledger-actions {
   white-space: nowrap;
   display: flex;

@@ -63,6 +63,11 @@ function migrateData(data) {
       m.priceTable = 'A';
       delete m.price;
     }
+    m.ledger?.forEach((l) => {
+      if (l.type === 'recharge' && l.item?.includes('取消订场退款')) {
+        l.type = 'refund';
+      }
+    });
   });
   data.bookings.forEach((b) => {
     if (b.startHour == null && b.slotIndex != null) {
@@ -255,6 +260,38 @@ function formatMoney(n) {
 
 function formatBalance(n) {
   return `${Number(n).toFixed(2)}元`;
+}
+
+function getLedgerTypeLabel(type) {
+  if (type === 'consume') return '消费';
+  if (type === 'refund') return '退款';
+  return '充值';
+}
+
+function sumMemberRecharge(ledger) {
+  return ledger.filter((l) => l.type === 'recharge').reduce((s, l) => s + l.amount, 0);
+}
+
+function applyLedgerEntryToBalance(balance, entry) {
+  if (entry.type === 'consume') return balance - entry.amount;
+  return balance + entry.amount;
+}
+
+function buildMemberLedgerExportRows(member) {
+  const sorted = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let balance = 0;
+  return sorted.map((l) => {
+    balance = applyLedgerEntryToBalance(balance, l);
+    return {
+      name: member.name,
+      type: getLedgerTypeLabel(l.type),
+      date: formatDateTime(l.time),
+      rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
+      projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
+      projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
+      balance: balance.toFixed(2),
+    };
+  });
 }
 
 function slotLabel(startHour) {
@@ -856,7 +893,7 @@ function deleteLedgerEntry(memberId, ledgerId) {
         booking.ledgerId = null;
       }
     }
-  } else {
+  } else if (entry.type === 'recharge' || entry.type === 'refund') {
     m.balance -= entry.amount;
   }
 
@@ -1058,15 +1095,11 @@ function unlockBooking(date, courtId, startHour) {
       const court = COURTS.find((c) => c.id === booking.courtId);
       member.ledger.unshift({
         id: generateId(),
-        type: 'recharge',
+        type: 'refund',
         time: new Date().toISOString(),
         item: formatBookingLedgerItem(booking, court, '取消订场退款'),
         amount: booking.price,
       });
-      const key = getBookingKey(date, courtId, startHour);
-      member.ledger = member.ledger.filter(
-        (l) => !(l.type === 'consume' && l.bookingRef === key)
-      );
     }
   }
 
@@ -1387,29 +1420,73 @@ function onFixedCourtCellClick(e) {
   document.getElementById('unlock-dialog').showModal();
 }
 
-function exportMemberConsumeRecords(memberId) {
+function exportMemberLedgerRecords(memberId) {
   const m = getMember(memberId);
   if (!m) return;
-  const rows = m.ledger
-    .filter((l) => l.type === 'consume')
-    .map((l) => [formatDateTime(l.time), l.item, l.amount]);
-  exportCSV(`${m.name}_消费明细.csv`, ['时间', '项目', '金额(元)'], rows);
-  showToast(rows.length ? '消费明细已导出' : '该会员暂无消费记录');
+  const headers = ['会员名称', '类型', '日期', '充值记录', '消费项目', '金额(元)', '余额(元)'];
+  const rows = buildMemberLedgerExportRows(m);
+  if (!rows.length) {
+    exportCSV(`${m.name}_会员清单.csv`, headers, [[m.name, '', '', '', '', '', Number(m.balance).toFixed(2)]]);
+    showToast('会员清单已导出');
+    return;
+  }
+  exportCSV(
+    `${m.name}_会员清单.csv`,
+    headers,
+    rows.map((r) => [r.name, r.type, r.date, r.rechargeCol, r.projectCol, r.projectAmount, r.balance])
+  );
+  showToast('会员清单已导出');
 }
 
-function exportAllMemberConsumeRecords() {
-  const headers = ['会员名称', '时间', '项目', '金额(元)'];
-  const rows = [];
-  data.members.forEach((m) => {
-    m.ledger
-      .filter((l) => l.type === 'consume')
-      .forEach((l) => {
-        rows.push([m.name, formatDateTime(l.time), l.item, l.amount]);
-      });
+function exportAllMembersLedger() {
+  const headers = ['会员名称', '类型', '日期', '充值记录', '消费项目', '金额(元)', '余额(元)'];
+  const members = [...data.members].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  const bodyRows = [];
+
+  members.forEach((m) => {
+    const rows = buildMemberLedgerExportRows(m);
+    if (!rows.length) {
+      bodyRows.push(
+        `<tr><td style="text-align:center;vertical-align:middle">${escapeHtml(m.name)}</td><td></td><td></td><td></td><td></td><td></td><td>${Number(m.balance).toFixed(2)}</td></tr>`
+      );
+      return;
+    }
+    rows.forEach((r, idx) => {
+      const nameCell =
+        idx === 0
+          ? `<td rowspan="${rows.length}" style="text-align:center;vertical-align:middle">${escapeHtml(r.name)}</td>`
+          : '';
+      const amountCell = r.projectAmount !== '' ? r.projectAmount : '';
+      bodyRows.push(
+        `<tr>${nameCell}<td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.rechargeCol)}</td><td>${escapeHtml(r.projectCol)}</td><td>${amountCell}</td><td>${r.balance}</td></tr>`
+      );
+    });
   });
-  rows.sort((a, b) => new Date(b[1]) - new Date(a[1]));
-  exportCSV(`全部会员消费明细_${todayStr()}.csv`, headers, rows);
-  showToast(rows.length ? '全部会员消费明细已导出' : '暂无消费记录');
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8" /></head>
+<body>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
+<thead><tr>${headers.map((h) => `<th style="text-align:center;background:#f1f5f9">${h}</th>`).join('')}</tr></thead>
+<tbody>${bodyRows.join('')}</tbody>
+</table>
+</body></html>`;
+
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `全部会员清单_${todayStr()}.xls`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`已导出 ${members.length} 位会员清单`);
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ========== 渲染：订场表 ==========
@@ -1656,7 +1733,7 @@ function renderMemberDetail(id) {
           (l) => `
       <tr>
         <td>${formatDateTime(l.time)}</td>
-        <td class="type-${l.type}">${l.type === 'consume' ? '消费' : '充值'}</td>
+        <td class="type-${l.type}">${getLedgerTypeLabel(l.type)}</td>
         <td>${l.item}</td>
         <td class="type-${l.type}">${l.type === 'consume' ? '-' : '+'}${formatMoney(l.amount)}</td>
         <td class="ledger-actions">
@@ -1675,7 +1752,7 @@ function renderMemberDetail(id) {
         <p style="color:#64748b;font-size:0.85rem;margin-top:4px">会员 ID: ${m.id}</p>
       </div>
       <div class="detail-actions">
-        <button class="btn btn-secondary btn-sm" id="export-member-consume-btn">导出消费明细</button>
+        <button class="btn btn-secondary btn-sm" id="export-member-consume-btn">导出会员清单</button>
         <button class="btn btn-primary btn-sm" id="recharge-btn">充值</button>
         <button class="btn btn-secondary btn-sm" id="edit-member-btn">编辑</button>
         <button class="btn btn-danger btn-sm" id="delete-member-btn">删除</button>
@@ -1696,11 +1773,11 @@ function renderMemberDetail(id) {
       </div>
       <div class="info-card">
         <div class="label">累计充值</div>
-        <div class="value">${formatMoney(m.ledger.filter((l) => l.type === 'recharge').reduce((s, l) => s + l.amount, 0))}</div>
+        <div class="value">${formatMoney(sumMemberRecharge(m.ledger))}</div>
       </div>
     </div>
     <div class="ledger-section">
-      <h3>会员清单（消费 / 充值记录）</h3>
+      <h3>会员清单（消费 / 充值 / 退款记录）</h3>
       <table class="ledger-table">
         <thead>
           <tr>
@@ -1726,7 +1803,7 @@ function renderMemberDetail(id) {
   });
 
   document.getElementById('export-member-consume-btn').addEventListener('click', () => {
-    exportMemberConsumeRecords(id);
+    exportMemberLedgerRecords(id);
   });
 
   document.getElementById('edit-member-btn').addEventListener('click', () => {
@@ -1760,7 +1837,7 @@ function renderMemberDetail(id) {
     btn.addEventListener('click', () => {
       const ledgerId = btn.dataset.ledgerId;
       const entry = m.ledger.find((l) => l.id === ledgerId);
-      const action = entry.type === 'consume' ? '消费' : '充值';
+      const action = entry.type === 'consume' ? '消费' : entry.type === 'refund' ? '退款' : '充值';
       if (confirm(`确定删除该${action}记录？余额将相应调整。`)) {
         const result = deleteLedgerEntry(id, ledgerId);
         if (result.ok) {
@@ -1814,49 +1891,94 @@ function syncHolidayFromPriceTab(checked) {
 }
 
 // ========== 渲染：收入统计 ==========
-function getChargedBookingsForDate(date) {
-  return data.bookings.filter((b) => b.date === date && b.charged);
+function getIncomeDateRange() {
+  const startDate = document.getElementById('income-start').value;
+  const endDate = document.getElementById('income-end').value;
+  if (!startDate || !endDate) return null;
+  if (startDate > endDate) return { error: '开始日期不能晚于结束日期' };
+  return { startDate, endDate };
+}
+
+function getChargedBookingsInRange(startDate, endDate) {
+  return data.bookings.filter(
+    (b) => b.charged && b.date >= startDate && b.date <= endDate
+  );
+}
+
+function getRechargesInRange(startDate, endDate) {
+  const recharges = [];
+  data.members.forEach((m) => {
+    m.ledger.forEach((l) => {
+      const day = l.time.slice(0, 10);
+      if (
+        l.type === 'recharge' &&
+        day >= startDate &&
+        day <= endDate &&
+        l.item !== '初始充值' &&
+        l.item !== '充值赠送'
+      ) {
+        recharges.push({ ...l, memberName: m.name });
+      }
+    });
+  });
+  return recharges;
+}
+
+function formatBookingCourtDateTime(booking) {
+  return `${booking.date} ${slotRangeLabel(booking.startHour, getBookingSpan(booking))}`;
+}
+
+function getBookingCourtTimestamp(booking) {
+  return new Date(`${booking.date}T${String(booking.startHour).padStart(2, '0')}:00:00`).getTime();
 }
 
 function renderIncomeStats() {
-  const date = document.getElementById('income-date').value;
+  const range = getIncomeDateRange();
+  const tbody = document.getElementById('income-tbody');
+  const summary = document.getElementById('income-summary');
 
-  const dayBookings = getChargedBookingsForDate(date);
-  const memberBookingIncome = dayBookings
+  if (!range) {
+    summary.innerHTML = '';
+    tbody.innerHTML =
+      '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:40px">请选择开始和结束日期</td></tr>';
+    return;
+  }
+  if (range.error) {
+    summary.innerHTML = '';
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#ef4444;padding:40px">${range.error}</td></tr>`;
+    return;
+  }
+
+  const { startDate, endDate } = range;
+  const periodBookings = getChargedBookingsInRange(startDate, endDate);
+  const memberBookingIncome = periodBookings
     .filter((b) => b.type === 'member')
     .reduce((s, b) => s + b.price, 0);
-  const walkinIncome = dayBookings
+  const walkinIncome = periodBookings
     .filter((b) => b.type === 'walkin')
     .reduce((s, b) => s + b.price, 0);
-  const onlineIncome = dayBookings
+  const onlineIncome = periodBookings
     .filter((b) => b.type === 'online')
     .reduce((s, b) => s + b.price, 0);
   const bookingIncome = memberBookingIncome + walkinIncome + onlineIncome;
 
-  const dayRecharges = [];
-  data.members.forEach((m) => {
-    m.ledger.forEach((l) => {
-      if (
-        l.type === 'recharge' &&
-        l.time.slice(0, 10) === date &&
-        !l.item.includes('取消订场退款') &&
-        l.item !== '初始充值' &&
-        l.item !== '充值赠送'
-      ) {
-        dayRecharges.push({ ...l, memberName: m.name });
-      }
-    });
-  });
-  const rechargeIncome = dayRecharges.reduce((s, r) => s + r.amount, 0);
+  const periodRecharges = getRechargesInRange(startDate, endDate);
+  const rechargeIncome = periodRecharges.reduce((s, r) => s + r.amount, 0);
 
-  const cashWalkin = dayBookings
+  const cashWalkin = periodBookings
     .filter((b) => b.type === 'walkin' && b.walkinPayment === 'cash')
     .reduce((s, b) => s + b.price, 0);
-  const scanWalkin = dayBookings
+  const scanWalkin = periodBookings
     .filter((b) => b.type === 'walkin' && b.walkinPayment === 'scan')
     .reduce((s, b) => s + b.price, 0);
 
-  document.getElementById('income-summary').innerHTML = `
+  const periodLabel = startDate === endDate ? startDate : `${startDate} 至 ${endDate}`;
+
+  summary.innerHTML = `
+    <div class="summary-card">
+      <div class="label">统计区间</div>
+      <div class="value" style="font-size:1rem">${periodLabel}</div>
+    </div>
     <div class="summary-card">
       <div class="label">会员订场收入</div>
       <div class="value">${formatMoney(memberBookingIncome)}</div>
@@ -1879,20 +2001,21 @@ function renderIncomeStats() {
     </div>
     <div class="summary-card">
       <div class="label">已结算场次</div>
-      <div class="value">${dayBookings.length} 场</div>
+      <div class="value">${periodBookings.length} 场</div>
     </div>
     <div class="summary-card">
-      <div class="label">当日总收入</div>
+      <div class="label">总收入</div>
       <div class="value" style="color:#10b981">${formatMoney(bookingIncome + rechargeIncome)}</div>
     </div>
   `;
 
   const rows = [];
 
-  dayBookings.forEach((b) => {
+  periodBookings.forEach((b) => {
     const court = COURTS.find((c) => c.id === b.courtId);
     rows.push({
-      time: b.chargedAt || b.lockedAt,
+      sortKey: getBookingCourtTimestamp(b),
+      timeLabel: formatBookingCourtDateTime(b),
       member: b.memberName,
       court: court.name,
       slot: slotRangeLabel(b.startHour, getBookingSpan(b)),
@@ -1901,9 +2024,10 @@ function renderIncomeStats() {
     });
   });
 
-  dayRecharges.forEach((r) => {
+  periodRecharges.forEach((r) => {
     rows.push({
-      time: r.time,
+      sortKey: new Date(r.time).getTime(),
+      timeLabel: formatDateTime(r.time),
       member: r.memberName,
       court: '-',
       slot: '-',
@@ -1912,15 +2036,14 @@ function renderIncomeStats() {
     });
   });
 
-  rows.sort((a, b) => new Date(b.time) - new Date(a.time));
+  rows.sort((a, b) => b.sortKey - a.sortKey);
 
-  const tbody = document.getElementById('income-tbody');
   tbody.innerHTML = rows.length
     ? rows
         .map(
           (r) => `
       <tr>
-        <td>${formatDateTime(r.time)}</td>
+        <td>${r.timeLabel}</td>
         <td>${r.member}</td>
         <td>${r.court}</td>
         <td>${r.slot}</td>
@@ -1929,7 +2052,7 @@ function renderIncomeStats() {
       </tr>`
         )
         .join('')
-    : '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:40px">当日暂无收入记录</td></tr>';
+    : `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:40px">${periodLabel} 暂无收入记录</td></tr>`;
 }
 
 // ========== 导出 ==========
@@ -1963,36 +2086,65 @@ function exportBooking() {
   showToast('订场表已导出');
 }
 
-function exportIncome() {
-  const date = document.getElementById('income-date').value;
+function exportConsumptionReport() {
+  const range = getIncomeDateRange();
+  if (!range) {
+    showToast('请选择开始和结束日期');
+    return;
+  }
+  if (range.error) {
+    showToast(range.error);
+    return;
+  }
+  const { startDate, endDate } = range;
+
   const headers = ['时间', '会员/客户', '场地', '时段', '金额', '类型'];
   const rows = [];
-  getChargedBookingsForDate(date).forEach((b) => {
+
+  getChargedBookingsInRange(startDate, endDate).forEach((b) => {
     const court = COURTS.find((c) => c.id === b.courtId);
-    rows.push([
-      formatDateTime(b.chargedAt || b.lockedAt),
-      b.memberName,
-      court.name,
-      slotRangeLabel(b.startHour, getBookingSpan(b)),
-      b.price,
-      getBookingTypeLabel(b),
-    ]);
+    rows.push({
+      sortKey: getBookingCourtTimestamp(b),
+      cells: [
+        formatBookingCourtDateTime(b),
+        b.memberName,
+        court.name,
+        slotRangeLabel(b.startHour, getBookingSpan(b)),
+        b.price,
+        getBookingTypeLabel(b),
+      ],
+    });
   });
+
   data.members.forEach((m) => {
     m.ledger.forEach((l) => {
+      const day = l.time.slice(0, 10);
       if (
         l.type === 'recharge' &&
-        l.time.slice(0, 10) === date &&
-        !l.item.includes('取消订场退款') &&
+        day >= startDate &&
+        day <= endDate &&
         l.item !== '初始充值' &&
         l.item !== '充值赠送'
       ) {
-        rows.push([formatDateTime(l.time), m.name, '-', '-', l.amount, '会员充值']);
+        rows.push({
+          sortKey: new Date(l.time).getTime(),
+          cells: [formatDateTime(l.time), m.name, '-', '-', l.amount, '会员充值'],
+        });
       }
     });
   });
-  exportCSV(`收入统计_${date}.csv`, headers, rows);
-  showToast('收入报表已导出');
+
+  rows.sort((a, b) => b.sortKey - a.sortKey);
+  exportCSV(
+    `消费报表_${startDate}_${endDate}.csv`,
+    headers,
+    rows.map((r) => r.cells)
+  );
+  showToast(
+    rows.length
+      ? `已导出 ${startDate} 至 ${endDate} 消费报表（${rows.length} 条）`
+      : `${startDate} 至 ${endDate} 暂无消费记录`
+  );
 }
 
 // ========== 节假日 ==========
@@ -2050,9 +2202,10 @@ function initEvents() {
     document.getElementById('booking-date').value = document.getElementById('price-date').value;
     renderBookingTable();
   });
-  document.getElementById('income-date').addEventListener('change', renderIncomeStats);
+  document.getElementById('income-start').addEventListener('change', renderIncomeStats);
+  document.getElementById('income-end').addEventListener('change', renderIncomeStats);
   document.getElementById('export-booking').addEventListener('click', exportBooking);
-  document.getElementById('export-income').addEventListener('click', exportIncome);
+  document.getElementById('export-consumption-report').addEventListener('click', exportConsumptionReport);
 
   document.getElementById('holiday-toggle').addEventListener('change', (e) => {
     const date = document.getElementById('booking-date').value;
@@ -2128,7 +2281,7 @@ function initEvents() {
     }
   });
 
-  document.getElementById('export-all-consume-btn').addEventListener('click', exportAllMemberConsumeRecords);
+  document.getElementById('export-all-consume-btn').addEventListener('click', exportAllMembersLedger);
 
   document.getElementById('booking-cancel').addEventListener('click', () => {
     document.getElementById('booking-dialog').close();
@@ -2390,7 +2543,8 @@ function init() {
   const today = todayStr();
   document.getElementById('booking-date').value = today;
   document.getElementById('price-date').value = today;
-  document.getElementById('income-date').value = today;
+  document.getElementById('income-start').value = today;
+  document.getElementById('income-end').value = today;
   initEvents();
   renderBookingTable();
   renderFixedBookingTable();

@@ -378,10 +378,6 @@ function unlockBooking(date, courtId, startHour) {
         item: `取消订场退款 ${court.name} ${slotLabel(booking.startHour)}`,
         amount: booking.price,
       });
-      const key = getBookingKey(date, courtId, startHour);
-      member.ledger = member.ledger.filter(
-        (l) => !(l.type === 'consume' && l.bookingRef === key)
-      );
     }
   }
 
