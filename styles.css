@@ -644,7 +644,7 @@ body {
 }
 
 .receipt-modal {
-  max-width: 380px;
+  max-width: 420px;
 }
 
 .receipt-content {
@@ -695,6 +695,29 @@ body {
   font-size: 0.78rem;
   color: var(--text-muted);
   margin-top: 16px;
+}
+
+.receipt-day-bookings {
+  margin: 12px 0;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+}
+
+.receipt-subheader {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.receipt-day-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.6;
 }
 
 .receipt-modal .modal-actions {

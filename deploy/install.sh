@@ -27,12 +27,30 @@ if ! docker compose version >/dev/null 2>&1; then
   apt-get install -y docker-compose-plugin
 fi
 
+# 国内服务器拉取 docker.io 常超时，配置镜像加速
+if [ ! -f /etc/docker/daemon.json ] || ! grep -q registry-mirrors /etc/docker/daemon.json 2>/dev/null; then
+  echo "  正在配置 Docker 镜像加速（国内网络）..."
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.m.daocloud.io"
+  ]
+}
+EOF
+  systemctl restart docker
+fi
+
 # 创建 .env
 if [ ! -f .env ]; then
   cp .env.example .env
   RANDOM_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)
   sed -i "s/请改成强密码/Badminton$(openssl rand -hex 4 2>/dev/null || echo 2024)/" .env
   sed -i "s/请改成随机长字符串/${RANDOM_SECRET}/" .env
+  if ! grep -q '^SESSION_SECURE=' .env 2>/dev/null; then
+    echo "SESSION_SECURE=false" >> .env
+  fi
   echo ""
   echo "  ✅ 已生成 .env 配置文件"
   echo "  ⚠️  请编辑 .env 修改 ADMIN_PASSWORD 和 DOMAIN"

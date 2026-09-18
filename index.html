@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0ea5e9" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>羽毛球馆会员订场管理系统</title>
-  <link rel="stylesheet" href="styles.css?v=20260908" />
+  <link rel="stylesheet" href="styles.css?v=20260918" />
 </head>
 <body>
   <div class="app">
@@ -210,7 +210,7 @@
       <div id="walkin-booking-fields" class="hidden">
         <label>
           订场金额（元）
-          <input type="number" id="walkin-price" min="1" step="1" value="80" />
+          <input type="number" id="walkin-price" min="0.01" step="0.01" value="80" placeholder="如 2.5 或 2.75" />
         </label>
         <fieldset class="booking-type-fieldset">
           <legend>支付方式</legend>
@@ -227,7 +227,7 @@
       <div id="online-booking-fields" class="hidden">
         <label>
           订场金额（元）
-          <input type="number" id="online-price" min="1" step="1" value="80" />
+          <input type="number" id="online-price" min="0.01" step="0.01" value="80" />
         </label>
       </div>
       <label>
@@ -257,7 +257,40 @@
     </form>
   </dialog>
 
-  <!-- 取消锁定弹窗 -->
+  <!-- 订场详情 / 编辑（每日订场表） -->
+  <dialog id="booking-detail-dialog" class="modal">
+    <form method="dialog" id="booking-detail-form">
+      <h3>订场详情</h3>
+      <div class="form-info" id="booking-detail-summary"></div>
+      <label>
+        订场金额（元）
+        <input type="number" id="booking-detail-price" min="0.01" step="0.01" required />
+      </label>
+      <label>
+        备注
+        <input type="text" id="booking-detail-note" maxlength="80" placeholder="选填" />
+      </label>
+      <fieldset class="booking-type-fieldset hidden" id="booking-detail-walkin-payment">
+        <legend>现场支付方式</legend>
+        <label class="radio-label">
+          <input type="radio" name="detail-walkin-payment" value="cash" />
+          现金订场
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="detail-walkin-payment" value="scan" />
+          扫码支付
+        </label>
+      </fieldset>
+      <p class="warning-text hidden" id="booking-detail-charged-hint"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="booking-detail-close">关闭</button>
+        <button type="button" class="btn btn-danger" id="booking-detail-cancel-booking">取消订场</button>
+        <button type="submit" class="btn btn-primary">保存修改</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 取消锁定弹窗（固定场表） -->
   <dialog id="unlock-dialog" class="modal">
     <form method="dialog" id="unlock-form">
       <h3>取消锁定</h3>
@@ -337,6 +370,6 @@
 
   <div id="toast" class="toast"></div>
   <script src="prices.js?v=20260831d"></script>
-  <script src="app.js?v=20260908j"></script>
+  <script src="app.js?v=20260918c"></script>
 </body>
 </html>

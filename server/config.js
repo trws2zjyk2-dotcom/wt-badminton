@@ -38,7 +38,10 @@ module.exports = {
   ADMIN_USERS: loadAdminUsers(),
   SESSION_MAX_AGE: 7 * 24 * 60 * 60 * 1000,
   TRUST_PROXY: process.env.TRUST_PROXY === 'true' || isProduction,
-  SESSION_SECURE: process.env.SESSION_SECURE === 'true' || isProduction,
+  SESSION_SECURE:
+    process.env.SESSION_SECURE !== undefined
+      ? process.env.SESSION_SECURE === 'true'
+      : isProduction,
   SUPABASE_URL: process.env.SUPABASE_URL || '',
   SUPABASE_KEY: process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || '',
 };

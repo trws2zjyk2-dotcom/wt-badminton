@@ -28,6 +28,56 @@ const WEEKDAYS = [
 const STORAGE_KEY = 'badminton_court_data';
 let USE_SERVER_API = false;
 
+/** 本页会话内主动删除的 id（保存时与服务器合并，避免旧页面覆盖新订场） */
+const sessionDeletes = {
+  memberIds: new Set(),
+  bookingIds: new Set(),
+  fixedBookingIds: new Set(),
+};
+
+function resetSessionDeletes() {
+  sessionDeletes.memberIds.clear();
+  sessionDeletes.bookingIds.clear();
+  sessionDeletes.fixedBookingIds.clear();
+}
+
+function mergeDataForSave(server, local) {
+  const members = new Map();
+  for (const m of server.members) {
+    if (!sessionDeletes.memberIds.has(m.id)) members.set(m.id, m);
+  }
+  for (const m of local.members) {
+    if (!sessionDeletes.memberIds.has(m.id)) members.set(m.id, m);
+  }
+
+  const bookings = new Map();
+  for (const b of server.bookings) {
+    if (!sessionDeletes.bookingIds.has(b.id)) bookings.set(b.id, b);
+  }
+  for (const b of local.bookings) {
+    if (!sessionDeletes.bookingIds.has(b.id)) bookings.set(b.id, b);
+  }
+
+  const fixedBookings = new Map();
+  for (const b of server.fixedBookings || []) {
+    if (!sessionDeletes.fixedBookingIds.has(b.id)) fixedBookings.set(b.id, b);
+  }
+  for (const b of local.fixedBookings || []) {
+    if (!sessionDeletes.fixedBookingIds.has(b.id)) fixedBookings.set(b.id, b);
+  }
+
+  const holidays = [...new Set([...(server.holidays || []), ...(local.holidays || [])])];
+
+  return {
+    members: Array.from(members.values()),
+    bookings: Array.from(bookings.values()),
+    holidays,
+    fixedBookings: Array.from(fixedBookings.values()),
+  };
+}
+
+let saveInFlight = null;
+
 // ========== 数据层 ==========
 async function loadData() {
   if (USE_SERVER_API) {
@@ -83,26 +133,44 @@ function migrateData(data) {
   });
 }
 
-async function saveData(data) {
+async function saveData(payload) {
   if (USE_SERVER_API) {
-    try {
-      const res = await fetch('/api/data', {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.status === 401) {
-        window.location.href = '/login.html';
-        return;
+    const run = async () => {
+      try {
+        const latestRes = await fetch('/api/data', { credentials: 'include' });
+        if (latestRes.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+        if (!latestRes.ok) {
+          showToast('保存失败，请重试');
+          return;
+        }
+        const server = await latestRes.json();
+        migrateData(server);
+        const merged = mergeDataForSave(server, payload);
+        migrateData(merged);
+        data = merged;
+
+        const res = await fetch('/api/data', {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(merged),
+        });
+        if (res.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+        if (!res.ok) showToast('保存失败，请重试');
+      } catch {
+        showToast('网络错误，保存失败');
       }
-      if (!res.ok) showToast('保存失败，请重试');
-    } catch {
-      showToast('网络错误，保存失败');
-    }
-    return;
+    };
+    saveInFlight = (saveInFlight || Promise.resolve()).then(run);
+    return saveInFlight;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 }
 
 function readLocalStorageData() {
@@ -163,6 +231,7 @@ function normalizeBackupPayload(raw) {
 }
 
 async function applyImportedData(imported) {
+  resetSessionDeletes();
   data = imported;
   await saveData(data);
   selectedMemberId = null;
@@ -285,7 +354,7 @@ function buildMemberLedgerExportRows(member) {
     return {
       name: member.name,
       type: getLedgerTypeLabel(l.type),
-      date: formatDateTime(l.time),
+      operationTime: formatDateTime(l.time),
       rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
       projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
       projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
@@ -359,6 +428,7 @@ let data = { members: [], bookings: [], holidays: [], fixedBookings: [] };
 let selectedMemberId = null;
 let pendingBooking = null;
 let pendingUnlock = null;
+let pendingBookingDetail = null;
 let editingMemberId = null;
 let rechargingMemberId = null;
 let selectedRechargeBonus = 0;
@@ -844,6 +914,7 @@ function deleteMember(id) {
     return false;
   }
   data.members = data.members.filter((m) => m.id !== id);
+  sessionDeletes.memberIds.add(id);
   saveData(data);
   return true;
 }
@@ -977,7 +1048,7 @@ function lockWalkinBooking(date, courtId, startHour, price, payment, spanHours =
     memberId: null,
     memberName: `现场（${paymentLabel}）`,
     walkinPayment: payment,
-    price: Number(price),
+    price: Math.round(Number(price) * 100) / 100,
     note: note?.trim() || '',
     lockedAt: now,
     charged: true,
@@ -1008,7 +1079,7 @@ function lockOnlineBooking(date, courtId, startHour, price, spanHours = 1, note 
     spanHours,
     memberId: null,
     memberName: '线上平台',
-    price: Number(price),
+    price: Math.round(Number(price) * 100) / 100,
     note: note?.trim() || '',
     lockedAt: now,
     charged: true,
@@ -1104,21 +1175,71 @@ function unlockBooking(date, courtId, startHour) {
   }
 
   data.bookings = data.bookings.filter((b) => b.id !== booking.id);
+  sessionDeletes.bookingIds.add(booking.id);
   saveData(data);
   return { ok: true };
 }
 
 // ========== 会员消费清单 ==========
+function getLedgerEntryBookingDate(entry) {
+  if (entry.bookingRef) {
+    const booking = data.bookings.find(
+      (b) => getBookingKey(b.date, b.courtId, b.startHour) === entry.bookingRef
+    );
+    if (booking) return booking.date;
+  }
+  const match = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  return entry.time?.slice(0, 10) || null;
+}
+
+function getMemberBookingsOnDate(memberId, dateStr) {
+  if (!memberId || !dateStr) return [];
+  return data.bookings
+    .filter((b) => b.type === 'member' && b.memberId === memberId && b.date === dateStr)
+    .sort((a, b) => a.startHour - b.startHour || a.courtId.localeCompare(b.courtId));
+}
+
+function formatMemberDayBookingsLines(memberId, dateStr) {
+  const list = getMemberBookingsOnDate(memberId, dateStr);
+  if (!list.length) return [];
+  return list.map((b) => {
+    const court = COURTS.find((c) => c.id === b.courtId);
+    const status = b.charged ? '已扣费' : '待扣费';
+    const note = b.note?.trim() ? ` · ${b.note.trim()}` : '';
+    return `${court?.name || b.courtId} ${slotRangeLabel(b.startHour, getBookingSpan(b))} ${formatMoney(b.price)}（${status}）${note}`;
+  });
+}
+
 function buildReceiptText(member, entry) {
-  return [
+  const lines = [
     '【羽毛球馆消费清单】',
     `会员名称：${member.name}`,
     `消费时间：${formatDateTime(entry.time)}`,
     `消费项目：${entry.item}`,
     `消费金额：${formatMoney(entry.amount)}`,
-    `账户余额：${formatBalance(member.balance)}`,
-    '感谢您的光临！',
-  ].join('\n');
+  ];
+  const bookingDate = getLedgerEntryBookingDate(entry);
+  const dayLines = formatMemberDayBookingsLines(member.id, bookingDate);
+  if (dayLines.length) {
+    lines.push('', `【${formatBookingDate(bookingDate)} 当日全部订场】`);
+    dayLines.forEach((line) => lines.push(`· ${line}`));
+  }
+  lines.push(`账户余额：${formatBalance(member.balance)}`, '感谢您的光临！');
+  return lines.join('\n');
+}
+
+function buildReceiptDayBookingsHtml(member, entry) {
+  const bookingDate = getLedgerEntryBookingDate(entry);
+  const dayLines = formatMemberDayBookingsLines(member.id, bookingDate);
+  if (!dayLines.length) return '';
+  return `
+    <div class="receipt-day-bookings">
+      <div class="receipt-subheader">${formatBookingDate(bookingDate)} 当日全部订场</div>
+      <ul class="receipt-day-list">
+        ${dayLines.map((line) => `<li>${line}</li>`).join('')}
+      </ul>
+    </div>`;
 }
 
 function showMemberReceipt(member, entry) {
@@ -1129,11 +1250,112 @@ function showMemberReceipt(member, entry) {
     <div class="receipt-row"><span>消费时间</span><strong>${formatDateTime(entry.time)}</strong></div>
     <div class="receipt-row"><span>消费项目</span><strong>${entry.item}</strong></div>
     <div class="receipt-row"><span>消费金额</span><strong class="receipt-amount">${formatMoney(entry.amount)}</strong></div>
+    ${buildReceiptDayBookingsHtml(member, entry)}
     <div class="receipt-row receipt-balance"><span>账户余额</span><strong>${formatBalance(member.balance)}</strong></div>
     <p class="receipt-footer">请核对以上信息，如有疑问请联系前台。</p>
   `;
   content.dataset.text = buildReceiptText(member, entry);
   document.getElementById('receipt-dialog').showModal();
+}
+
+function openBookingDetailDialog(date, courtId, startHour) {
+  const booking = getBooking(date, courtId, startHour);
+  if (!booking) return;
+  const court = COURTS.find((c) => c.id === courtId);
+  const span = getBookingSpan(booking);
+  pendingBookingDetail = { date, courtId, startHour: booking.startHour };
+
+  const typeLabel = getBookingTypeLabel(booking);
+  const chargeLabel =
+    booking.type === 'member'
+      ? booking.charged
+        ? '已扣费'
+        : '待扣费（时段结束后自动扣）'
+      : '已收款';
+
+  document.getElementById('booking-detail-summary').innerHTML = `
+    <strong>类型：</strong>${typeLabel}<br>
+    <strong>客户：</strong>${booking.memberName}<br>
+    <strong>日期：</strong>${formatBookingDate(booking.date)}<br>
+    <strong>场地：</strong>${court?.name || courtId} · ${slotRangeLabel(booking.startHour, span)}<br>
+    <strong>状态：</strong>${chargeLabel}
+  `;
+
+  document.getElementById('booking-detail-price').value = Number(booking.price).toFixed(2);
+  document.getElementById('booking-detail-note').value = booking.note || '';
+
+  const walkinPay = document.getElementById('booking-detail-walkin-payment');
+  if (booking.type === 'walkin') {
+    walkinPay.classList.remove('hidden');
+    const pay = booking.walkinPayment === 'scan' ? 'scan' : 'cash';
+    walkinPay.querySelector(`input[value="${pay}"]`).checked = true;
+  } else {
+    walkinPay.classList.add('hidden');
+  }
+
+  const hint = document.getElementById('booking-detail-charged-hint');
+  if (booking.type === 'member' && booking.charged) {
+    hint.textContent = '修改金额将同步调整会员余额与对应消费记录';
+    hint.classList.remove('hidden');
+  } else if (booking.type === 'walkin') {
+    hint.textContent = '取消订场请确认已处理退款';
+    hint.classList.remove('hidden');
+  } else if (booking.type === 'online') {
+    hint.textContent = '取消订场请确认已在平台处理退款';
+    hint.classList.remove('hidden');
+  } else {
+    hint.textContent = '该订场尚未扣费，取消不会产生费用';
+    hint.classList.remove('hidden');
+  }
+
+  document.getElementById('booking-detail-dialog').showModal();
+}
+
+function updateBookingFromDetail(date, courtId, startHour, fields) {
+  const booking = getBooking(date, courtId, startHour);
+  if (!booking) return { ok: false, msg: '订场记录不存在' };
+
+  const newPrice = Math.round(Number(fields.price) * 100) / 100;
+  if (!Number.isFinite(newPrice) || newPrice < 0.01) {
+    return { ok: false, msg: '请输入有效金额（最少 0.01 元）' };
+  }
+
+  const court = COURTS.find((c) => c.id === booking.courtId);
+  const note = (fields.note || '').trim();
+
+  if (booking.type === 'walkin' && fields.walkinPayment) {
+    booking.walkinPayment = fields.walkinPayment;
+    const paymentLabel = fields.walkinPayment === 'cash' ? '现金' : '扫码';
+    booking.memberName = `现场（${paymentLabel}）`;
+  }
+
+  if (booking.type === 'member' && booking.charged && booking.memberId) {
+    const member = getMember(booking.memberId);
+    if (member) {
+      const diff = newPrice - booking.price;
+      if (diff !== 0) {
+        member.balance -= diff;
+        const ledgerEntry = member.ledger.find((l) => l.id === booking.ledgerId);
+        if (ledgerEntry) {
+          ledgerEntry.amount = newPrice;
+        }
+      }
+    }
+  }
+
+  booking.price = newPrice;
+  booking.note = note;
+
+  if (booking.type === 'member' && booking.charged && booking.memberId) {
+    const member = getMember(booking.memberId);
+    const ledgerEntry = member?.ledger.find((l) => l.id === booking.ledgerId);
+    if (ledgerEntry) {
+      ledgerEntry.item = formatBookingLedgerItem(booking, court);
+    }
+  }
+
+  saveData(data);
+  return { ok: true, msg: '已保存修改' };
 }
 
 // ========== 固定场表 ==========
@@ -1228,6 +1450,7 @@ function unlockFixedBooking(weekday, courtId, startHour) {
   const booking = getFixedBooking(weekday, courtId, startHour);
   if (!booking) return { ok: false, msg: '固定场记录不存在' };
   data.fixedBookings = data.fixedBookings.filter((b) => b.id !== booking.id);
+  sessionDeletes.fixedBookingIds.add(booking.id);
   saveData(data);
   return { ok: true };
 }
@@ -1423,23 +1646,23 @@ function onFixedCourtCellClick(e) {
 function exportMemberLedgerRecords(memberId) {
   const m = getMember(memberId);
   if (!m) return;
-  const headers = ['会员名称', '类型', '日期', '充值记录', '消费项目', '金额(元)', '余额(元)'];
+  const headers = ['会员名称', '类型', '充值记录', '消费项目', '金额(元)', '余额(元)', '操作时间'];
   const rows = buildMemberLedgerExportRows(m);
   if (!rows.length) {
-    exportCSV(`${m.name}_会员清单.csv`, headers, [[m.name, '', '', '', '', '', Number(m.balance).toFixed(2)]]);
+    exportCSV(`${m.name}_会员清单.csv`, headers, [[m.name, '', '', '', '', Number(m.balance).toFixed(2), '']]);
     showToast('会员清单已导出');
     return;
   }
   exportCSV(
     `${m.name}_会员清单.csv`,
     headers,
-    rows.map((r) => [r.name, r.type, r.date, r.rechargeCol, r.projectCol, r.projectAmount, r.balance])
+    rows.map((r) => [r.name, r.type, r.rechargeCol, r.projectCol, r.projectAmount, r.balance, r.operationTime])
   );
   showToast('会员清单已导出');
 }
 
 function exportAllMembersLedger() {
-  const headers = ['会员名称', '类型', '日期', '充值记录', '消费项目', '金额(元)', '余额(元)'];
+  const headers = ['会员名称', '类型', '充值记录', '消费项目', '金额(元)', '余额(元)', '操作时间'];
   const members = [...data.members].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
   const bodyRows = [];
 
@@ -1447,7 +1670,7 @@ function exportAllMembersLedger() {
     const rows = buildMemberLedgerExportRows(m);
     if (!rows.length) {
       bodyRows.push(
-        `<tr><td style="text-align:center;vertical-align:middle">${escapeHtml(m.name)}</td><td></td><td></td><td></td><td></td><td></td><td>${Number(m.balance).toFixed(2)}</td></tr>`
+        `<tr><td style="text-align:center;vertical-align:middle">${escapeHtml(m.name)}</td><td></td><td></td><td></td><td></td><td>${Number(m.balance).toFixed(2)}</td><td></td></tr>`
       );
       return;
     }
@@ -1458,7 +1681,7 @@ function exportAllMembersLedger() {
           : '';
       const amountCell = r.projectAmount !== '' ? r.projectAmount : '';
       bodyRows.push(
-        `<tr>${nameCell}<td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.rechargeCol)}</td><td>${escapeHtml(r.projectCol)}</td><td>${amountCell}</td><td>${r.balance}</td></tr>`
+        `<tr>${nameCell}<td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.rechargeCol)}</td><td>${escapeHtml(r.projectCol)}</td><td>${amountCell}</td><td>${r.balance}</td><td>${escapeHtml(r.operationTime)}</td></tr>`
       );
     });
   });
@@ -1538,7 +1761,7 @@ function renderBookingTable() {
         return `
           <td class="court-cell locked merged-cell ${isWalkin ? 'walkin-cell' : ''} ${isOnline ? 'online-cell' : ''} ${isVip ? 'vip-row' : ''}"
               colspan="${span}"
-              data-date="${date}" data-court="${court.id}" data-hour="${booking.startHour}" data-action="unlock">
+              data-date="${date}" data-court="${court.id}" data-hour="${booking.startHour}" data-action="detail">
             <div class="cell-content">
               <span class="member-name">${booking.memberName}</span>
               ${slotText ? `<span class="slot-tag">${slotText}</span>` : ''}
@@ -1574,48 +1797,10 @@ function onCourtCellClick(e) {
   const startHour = Number(cell.dataset.hour);
   const action = cell.dataset.action;
 
-  const court = COURTS.find((c) => c.id === courtId);
-
   if (action === 'book') {
     toggleBookingSelection(date, courtId, startHour);
   } else {
-    const booking = getBooking(date, courtId, startHour);
-    pendingUnlock = { mode: 'daily', date, courtId, startHour: booking.startHour };
-    const span = getBookingSpan(booking);
-    const paymentInfo = booking.type === 'walkin'
-      ? `（${booking.walkinPayment === 'cash' ? '现金' : '扫码'}支付）`
-      : booking.type === 'online'
-        ? '（线上平台已支付）'
-        : booking.charged ? '（已扣费）' : '（待扣费，取消无需退款）';
-
-    let priceDetail = '';
-    if (booking.type === 'member' && booking.memberPrice != null) {
-      priceDetail = `<br><strong>计价：</strong>会员表${booking.priceTable || ''} ${formatMoney(booking.memberPrice)} / 统一价 ${formatMoney(booking.unifiedPrice)} → 取低 ${formatMoney(booking.price)}`;
-    }
-
-    document.getElementById('unlock-info').innerHTML = `
-      <strong>客户：</strong>${booking.memberName}<br>
-      <strong>日期：</strong>${formatBookingDate(booking.date)}<br>
-      <strong>场地：</strong>${court.name} · ${slotRangeLabel(booking.startHour, span)}<br>
-      <strong>费用：</strong>${formatMoney(booking.price)} ${paymentInfo}${priceDetail}
-      ${booking.note?.trim() ? `<br><strong>备注：</strong>${booking.note.trim()}` : ''}
-    `;
-
-    const warn = document.getElementById('unlock-warning');
-    if (booking.type === 'member' && booking.charged) {
-      warn.textContent = '取消后将退还消费金额至会员余额';
-      warn.style.display = '';
-    } else if (booking.type === 'walkin') {
-      warn.textContent = '取消现场订场请确认已处理退款';
-      warn.style.display = '';
-    } else if (booking.type === 'online') {
-      warn.textContent = '取消线上平台订场请确认已在平台处理退款';
-      warn.style.display = '';
-    } else {
-      warn.textContent = '该订场尚未扣费，取消后不会产生费用';
-      warn.style.display = '';
-    }
-    document.getElementById('unlock-dialog').showModal();
+    openBookingDetailDialog(date, courtId, startHour);
   }
 }
 
@@ -1732,7 +1917,6 @@ function renderMemberDetail(id) {
         .map(
           (l) => `
       <tr>
-        <td>${formatDateTime(l.time)}</td>
         <td class="type-${l.type}">${getLedgerTypeLabel(l.type)}</td>
         <td>${l.item}</td>
         <td class="type-${l.type}">${l.type === 'consume' ? '-' : '+'}${formatMoney(l.amount)}</td>
@@ -1740,6 +1924,7 @@ function renderMemberDetail(id) {
           ${l.type === 'consume' ? `<button class="btn btn-secondary btn-sm ledger-receipt" data-ledger-id="${l.id}">发送清单</button>` : ''}
           <button class="btn btn-danger btn-sm ledger-delete" data-ledger-id="${l.id}">删除</button>
         </td>
+        <td>${formatDateTime(l.time)}</td>
       </tr>`
         )
         .join('')
@@ -1781,11 +1966,11 @@ function renderMemberDetail(id) {
       <table class="ledger-table">
         <thead>
           <tr>
-            <th>时间</th>
             <th>类型</th>
             <th>项目</th>
             <th>金额</th>
             <th>操作</th>
+            <th>操作时间</th>
           </tr>
         </thead>
         <tbody>${ledgerRows}</tbody>
@@ -2318,8 +2503,13 @@ function initEvents() {
       }
     } else if (type === 'walkin') {
       const price = document.getElementById('walkin-price').value;
+      const priceNum = Math.round(Number(price) * 100) / 100;
+      if (!Number.isFinite(priceNum) || priceNum < 0.01) {
+        showToast('请输入有效金额（最少 0.01 元，支持两位小数）');
+        return;
+      }
       const payment = document.querySelector('input[name="walkin-payment"]:checked').value;
-      result = lockAllWalkinBookings(pendingBooking.date, slotGroups, price, payment, note);
+      result = lockAllWalkinBookings(pendingBooking.date, slotGroups, priceNum, payment, note);
       if (result.ok) {
         document.getElementById('booking-dialog').close();
         clearBookingSelection();
@@ -2346,36 +2536,75 @@ function initEvents() {
     document.getElementById('unlock-dialog').close();
   });
 
+  document.getElementById('booking-detail-close').addEventListener('click', () => {
+    document.getElementById('booking-detail-dialog').close();
+  });
+
+  document.getElementById('booking-detail-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!pendingBookingDetail) return;
+    const { date, courtId, startHour } = pendingBookingDetail;
+    const walkinPaymentEl = document.querySelector('input[name="detail-walkin-payment"]:checked');
+    const result = updateBookingFromDetail(date, courtId, startHour, {
+      price: document.getElementById('booking-detail-price').value,
+      note: document.getElementById('booking-detail-note').value,
+      walkinPayment: walkinPaymentEl?.value,
+    });
+    if (result.ok) {
+      document.getElementById('booking-detail-dialog').close();
+      renderBookingTable();
+      if (selectedMemberId) renderMemberDetail(selectedMemberId);
+      renderMemberList(document.getElementById('member-search').value);
+      if (document.getElementById('tab-income')?.classList.contains('active')) {
+        renderIncomeStats();
+      }
+      showToast(result.msg);
+    } else {
+      showToast(result.msg);
+    }
+  });
+
+  document.getElementById('booking-detail-cancel-booking').addEventListener('click', () => {
+    if (!pendingBookingDetail) return;
+    const booking = getBooking(
+      pendingBookingDetail.date,
+      pendingBookingDetail.courtId,
+      pendingBookingDetail.startHour
+    );
+    if (!booking) return;
+    if (!confirm(`确定取消该${getBookingTypeLabel(booking)}？`)) return;
+
+    const result = unlockBooking(
+      pendingBookingDetail.date,
+      pendingBookingDetail.courtId,
+      pendingBookingDetail.startHour
+    );
+    if (result.ok) {
+      document.getElementById('booking-detail-dialog').close();
+      renderBookingTable();
+      if (selectedMemberId) renderMemberDetail(selectedMemberId);
+      renderMemberList(document.getElementById('member-search').value);
+      if (document.getElementById('tab-income')?.classList.contains('active')) {
+        renderIncomeStats();
+      }
+      showToast('已取消订场');
+    } else {
+      showToast(result.msg);
+    }
+  });
+
   document.getElementById('unlock-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    let result;
-    if (pendingUnlock?.mode === 'fixed') {
-      result = unlockFixedBooking(
-        pendingUnlock.weekday,
-        pendingUnlock.courtId,
-        pendingUnlock.startHour
-      );
-      if (result.ok) {
-        document.getElementById('unlock-dialog').close();
-        renderFixedBookingTable();
-        showToast('已取消固定场锁定');
-      } else {
-        showToast(result.msg);
-      }
-      return;
-    }
-
-    result = unlockBooking(
-      pendingUnlock.date,
+    if (pendingUnlock?.mode !== 'fixed') return;
+    const result = unlockFixedBooking(
+      pendingUnlock.weekday,
       pendingUnlock.courtId,
       pendingUnlock.startHour
     );
     if (result.ok) {
       document.getElementById('unlock-dialog').close();
-      renderBookingTable();
-      if (selectedMemberId) renderMemberDetail(selectedMemberId);
-      renderMemberList(document.getElementById('member-search').value);
-      showToast('已取消锁定');
+      renderFixedBookingTable();
+      showToast('已取消固定场锁定');
     } else {
       showToast(result.msg);
     }
@@ -2530,6 +2759,7 @@ async function bootstrap() {
 
   try {
     data = await loadData();
+    resetSessionDeletes();
     await tryMigrateFromLocalStorage();
     await initSampleData();
     init();
@@ -2537,6 +2767,25 @@ async function bootstrap() {
     console.error(err);
     showToast('系统加载失败，请刷新页面重试');
   }
+}
+
+async function refreshDataFromServer() {
+  if (!USE_SERVER_API) return;
+  try {
+    const res = await fetch('/api/data', { credentials: 'include' });
+    if (!res.ok) return;
+    const fresh = await res.json();
+    migrateData(fresh);
+    data = fresh;
+    renderBookingTable();
+    renderFixedBookingTable();
+    renderDailyPriceTable();
+    renderMemberList(document.getElementById('member-search')?.value || '');
+    if (selectedMemberId) renderMemberDetail(selectedMemberId);
+    if (document.getElementById('tab-income')?.classList.contains('active')) {
+      renderIncomeStats();
+    }
+  } catch (_) {}
 }
 
 function init() {
@@ -2556,7 +2805,10 @@ function init() {
   }, 30000);
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) processDueCharges();
+    if (!document.hidden) {
+      refreshDataFromServer();
+      processDueCharges();
+    }
   });
 }
 
