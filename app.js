@@ -416,68 +416,42 @@ function applyLedgerEntryToBalance(balance, entry) {
   return balance + entry.amount;
 }
 
-function getLedgerEntryBookingSortTime(entry) {
-  if (entry.bookingRef) {
-    const [date, , startHourRaw] = entry.bookingRef.split('|');
-    const startHour = Number(startHourRaw);
-    if (date && Number.isFinite(startHour)) {
-      const t = new Date(
-        `${date}T${String(startHour).padStart(2, '0')}:00:00+08:00`
-      ).getTime();
-      if (Number.isFinite(t)) return t;
-    }
-  }
-  const dateMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
-  const hourMatch = entry.item?.match(/\b(\d{1,2}):00-\d{1,2}:00/);
-  if (dateMatch) {
-    const h = hourMatch ? Number(hourMatch[1]) : 0;
-    const t = new Date(
-      `${dateMatch[1]}T${String(h).padStart(2, '0')}:00:00+08:00`
-    ).getTime();
-    if (Number.isFinite(t)) return t;
-  }
-  return new Date(entry.time).getTime();
-}
-
-function compareLedgerEntryByBookingTimeDesc(a, b) {
-  const byBooking = getLedgerEntryBookingSortTime(b) - getLedgerEntryBookingSortTime(a);
-  if (byBooking !== 0) return byBooking;
-  return new Date(b.time) - new Date(a.time);
-}
-
-function buildMemberLedgerBalanceById(member) {
-  const sorted = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
-  let running = 0;
-  const balanceById = new Map();
-  for (const l of sorted) {
-    running = applyLedgerEntryToBalance(running, l);
-    balanceById.set(l.id, running);
-  }
-  return balanceById;
-}
-
 function buildMemberLedgerExportRows(member) {
-  const balanceById = buildMemberLedgerBalanceById(member);
-  const sorted = [...member.ledger].sort(compareLedgerEntryByBookingTimeDesc);
-  return sorted.map((l) => ({
-    name: member.name,
-    type: getLedgerTypeLabel(l.type),
-    operationTime: formatDateTime(l.time),
-    rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
-    projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
-    projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
-    balance: (balanceById.get(l.id) ?? member.balance).toFixed(2),
-  }));
+  const sortedByOpTime = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let balance = 0;
+  const rowById = new Map();
+  for (const l of sortedByOpTime) {
+    balance = applyLedgerEntryToBalance(balance, l);
+    rowById.set(l.id, {
+      name: member.name,
+      type: getLedgerTypeLabel(l.type),
+      operationTime: formatDateTime(l.time),
+      rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
+      projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
+      projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
+      balance: balance.toFixed(2),
+    });
+  }
+  return [...member.ledger]
+    .sort(compareLedgerByBookingTimeDesc)
+    .map((l) => rowById.get(l.id))
+    .filter(Boolean);
 }
 
 function buildMemberLedgerDisplayRows(member) {
-  const balanceById = buildMemberLedgerBalanceById(member);
+  const sortedByOpTime = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let running = 0;
+  const balanceById = new Map();
+  for (const l of sortedByOpTime) {
+    running = applyLedgerEntryToBalance(running, l);
+    balanceById.set(l.id, running);
+  }
   return [...member.ledger]
+    .sort(compareLedgerByBookingTimeDesc)
     .map((l) => ({
       entry: l,
       balanceAfter: balanceById.get(l.id) ?? member.balance,
-    }))
-    .sort((a, b) => compareLedgerEntryByBookingTimeDesc(a.entry, b.entry));
+    }));
 }
 
 function slotLabel(startHour) {
@@ -1323,15 +1297,52 @@ function unlockBooking(date, courtId, startHour) {
 
 // ========== 会员消费清单 ==========
 function getLedgerEntryBookingDate(entry) {
+  const dateTime = getLedgerEntryBookingDateTime(entry);
+  if (!dateTime) return entry.time?.slice(0, 10) || null;
+  return dateTime.slice(0, 10);
+}
+
+function getLedgerEntryBookingDateTime(entry) {
   if (entry.bookingRef) {
+    const parts = entry.bookingRef.split('|');
+    if (parts.length >= 3) {
+      const date = parts[0];
+      const hour = Number(parts[2]);
+      if (date && Number.isFinite(hour)) {
+        return `${date}T${String(hour).padStart(2, '0')}:00:00+08:00`;
+      }
+    }
     const booking = data.bookings.find(
       (b) => getBookingKey(b.date, b.courtId, b.startHour) === entry.bookingRef
     );
-    if (booking) return booking.date;
+    if (booking) {
+      const hour = Number(booking.startHour);
+      if (Number.isFinite(hour)) {
+        return `${booking.date}T${String(hour).padStart(2, '0')}:00:00+08:00`;
+      }
+      return `${booking.date}T00:00:00+08:00`;
+    }
   }
-  const match = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
-  if (match) return match[1];
-  return entry.time?.slice(0, 10) || null;
+  const slotMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})\s+\S+\s+(\d{1,2}):\d{2}-/);
+  if (slotMatch) {
+    return `${slotMatch[1]}T${String(Number(slotMatch[2])).padStart(2, '0')}:00:00+08:00`;
+  }
+  const dateMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) return `${dateMatch[1]}T00:00:00+08:00`;
+  return entry.time || null;
+}
+
+function getLedgerEntryBookingSortTime(entry) {
+  const dateTime = getLedgerEntryBookingDateTime(entry);
+  const ms = new Date(dateTime).getTime();
+  if (Number.isFinite(ms)) return ms;
+  const op = new Date(entry.time).getTime();
+  return Number.isFinite(op) ? op : 0;
+}
+
+function compareLedgerByBookingTimeDesc(a, b) {
+  const diff = getLedgerEntryBookingSortTime(b) - getLedgerEntryBookingSortTime(a);
+  return diff !== 0 ? diff : new Date(b.time) - new Date(a.time);
 }
 
 function getMemberDayConsumeEntries(member, dateStr) {
@@ -1342,7 +1353,7 @@ function getMemberDayConsumeEntries(member, dateStr) {
       const d = getLedgerEntryBookingDate(l) || l.time?.slice(0, 10);
       return d === dateStr;
     })
-    .sort(compareLedgerEntryByBookingTimeDesc);
+    .sort(compareLedgerByBookingTimeDesc);
 }
 
 function getMemberDayConsumeTotal(member, dateStr) {

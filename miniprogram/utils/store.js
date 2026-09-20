@@ -575,9 +575,60 @@ function buildReceiptText(member, entry) {
   ].join('\n');
 }
 
+function getLedgerEntryBookingSortTime(entry, bookings) {
+  if (entry.bookingRef) {
+    const parts = entry.bookingRef.split('|');
+    if (parts.length >= 3) {
+      const date = parts[0];
+      const hour = Number(parts[2]);
+      if (date && Number.isFinite(hour)) {
+        const ms = new Date(
+          `${date}T${String(hour).padStart(2, '0')}:00:00+08:00`
+        ).getTime();
+        if (Number.isFinite(ms)) return ms;
+      }
+    }
+    const booking = (bookings || []).find(
+      (b) => `${b.date}|${b.courtId}|${b.startHour}` === entry.bookingRef
+    );
+    if (booking) {
+      const hour = Number(booking.startHour);
+      if (Number.isFinite(hour)) {
+        const ms = new Date(
+          `${booking.date}T${String(hour).padStart(2, '0')}:00:00+08:00`
+        ).getTime();
+        if (Number.isFinite(ms)) return ms;
+      }
+    }
+  }
+  const slotMatch = entry.item && entry.item.match(/(\d{4}-\d{2}-\d{2})\s+\S+\s+(\d{1,2}):\d{2}-/);
+  if (slotMatch) {
+    const ms = new Date(
+      `${slotMatch[1]}T${String(Number(slotMatch[2])).padStart(2, '0')}:00:00+08:00`
+    ).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  const dateMatch = entry.item && entry.item.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    const ms = new Date(`${dateMatch[1]}T00:00:00+08:00`).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  const op = new Date(entry.time).getTime();
+  return Number.isFinite(op) ? op : 0;
+}
+
+function compareLedgerByBookingTimeDesc(a, b, bookings) {
+  const diff = getLedgerEntryBookingSortTime(b, bookings) - getLedgerEntryBookingSortTime(a, bookings);
+  return diff !== 0 ? diff : new Date(b.time) - new Date(a.time);
+}
+
 function getMemberDetail(id) {
   const m = getMember(id);
   if (!m) return null;
+  const bookings = getData().bookings || [];
+  const sortedLedger = [...m.ledger].sort((a, b) =>
+    compareLedgerByBookingTimeDesc(a, b, bookings)
+  );
   const consumeTotal = m.ledger.reduce((total, l) => {
     if (l.type === 'consume') return total + l.amount;
     if (l.type === 'refund') return total - l.amount;
@@ -597,7 +648,7 @@ function getMemberDetail(id) {
     priceTableLabel: getPriceTableLabel(m.priceTable),
     consumeTotalText: formatMoney(consumeTotal),
     rechargeTotalText: formatMoney(rechargeTotal),
-    ledger: m.ledger.map((l) => {
+    ledger: sortedLedger.map((l) => {
       return Object.assign({}, l, {
         timeText: require('./util').formatDateTime(l.time),
         typeLabel: l.type === 'consume' ? '消费' : '充值',
