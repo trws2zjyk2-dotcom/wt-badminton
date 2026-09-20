@@ -2554,27 +2554,6 @@ function initEvents() {
   });
   document.getElementById('income-start').addEventListener('change', renderIncomeStats);
   document.getElementById('income-end').addEventListener('change', renderIncomeStats);
-  document.getElementById('process-charges-btn').addEventListener('click', async () => {
-    await refreshDataFromServer();
-    const n = processDueCharges();
-    if (n > 0) {
-      showToast(`已补扣 ${n} 笔会员订场`);
-      return;
-    }
-    const date = document.getElementById('booking-date').value;
-    const pending = data.bookings.filter(
-      (b) =>
-        b.type === 'member' &&
-        b.date === date &&
-        isBookingEnded(b) &&
-        bookingNeedsChargeRepair(b)
-    );
-    showToast(
-      pending.length
-        ? `${date} 仍有 ${pending.length} 笔待扣费，请刷新后重试或检查会员是否存在`
-        : '暂无需要扣费的订场'
-    );
-  });
   document.getElementById('export-booking').addEventListener('click', exportBooking);
   document.getElementById('export-consumption-report').addEventListener('click', exportConsumptionReport);
 

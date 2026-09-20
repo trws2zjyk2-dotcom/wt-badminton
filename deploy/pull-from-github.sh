@@ -17,4 +17,4 @@ fi
 
 sudo docker compose -f docker-compose.run.yml up -d --build
 echo ""
-echo "部署完成。请打开网站，在每日订场表点「补扣到期订场」。"
+echo "部署完成。请打开网站登录验证。"
