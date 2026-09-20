@@ -1,5 +1,6 @@
 const fs = require('fs');
 const config = require('./config');
+const { processDueCharges } = require('./charges');
 
 const EMPTY_DATA = { members: [], bookings: [], holidays: [], fixedBookings: [] };
 
@@ -58,14 +59,16 @@ async function saveToSupabase(data) {
 }
 
 async function loadServerData() {
-  if (config.SUPABASE_URL && config.SUPABASE_KEY) {
-    return loadFromSupabase();
-  }
-  return loadFromFile();
+  const data =
+    config.SUPABASE_URL && config.SUPABASE_KEY ? await loadFromSupabase() : loadFromFile();
+  const charged = processDueCharges(data);
+  if (charged > 0) await saveServerData(data);
+  return data;
 }
 
 async function saveServerData(data) {
   const normalized = normalizeData(data);
+  processDueCharges(normalized);
   if (config.SUPABASE_URL && config.SUPABASE_KEY) {
     await saveToSupabase(normalized);
     return;

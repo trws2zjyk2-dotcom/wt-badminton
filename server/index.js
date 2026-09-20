@@ -103,10 +103,20 @@ app.use((req, res) => {
   res.status(404).send('页面不存在');
 });
 
+async function runServerChargeCycle() {
+  try {
+    await loadServerData();
+  } catch (err) {
+    console.error('自动扣费检查失败:', err.message);
+  }
+}
+
 app.listen(config.PORT, '0.0.0.0', () => {
   console.log('');
   console.log('  🏸 羽毛球馆管理系统已启动');
   console.log(`  端口: ${config.PORT}`);
   console.log(`  数据存储: ${config.SUPABASE_URL ? 'Supabase 云数据库' : '本地文件'}`);
   console.log('');
+  runServerChargeCycle();
+  setInterval(runServerChargeCycle, 60 * 1000);
 });

@@ -41,13 +41,60 @@ function resetSessionDeletes() {
   sessionDeletes.fixedBookingIds.clear();
 }
 
+function computeBalanceFromLedger(ledger) {
+  const sorted = [...(ledger || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let balance = 0;
+  for (const l of sorted) balance = applyLedgerEntryToBalance(balance, l);
+  return Math.round(balance * 100) / 100;
+}
+
+function mergeMemberRecord(serverM, localM) {
+  const ledgerById = new Map();
+  for (const l of serverM.ledger || []) ledgerById.set(l.id, l);
+  for (const l of localM.ledger || []) ledgerById.set(l.id, l);
+  const ledger = Array.from(ledgerById.values()).sort(
+    (a, b) => new Date(b.time) - new Date(a.time)
+  );
+  return {
+    ...serverM,
+    ...localM,
+    name: localM.name ?? serverM.name,
+    priceTable: localM.priceTable ?? serverM.priceTable,
+    ledger,
+    balance: computeBalanceFromLedger(ledger),
+  };
+}
+
+function mergeBookingRecord(serverB, localB) {
+  const merged = { ...serverB, ...localB };
+  const serverCharged = serverB.charged && serverB.ledgerId;
+  const localCharged = localB.charged && localB.ledgerId;
+  if (serverCharged && !localCharged) {
+    merged.charged = serverB.charged;
+    merged.chargedAt = serverB.chargedAt;
+    merged.ledgerId = serverB.ledgerId;
+  } else if (localCharged && !serverCharged) {
+    merged.charged = localB.charged;
+    merged.chargedAt = localB.chargedAt;
+    merged.ledgerId = localB.ledgerId;
+  } else if (serverB.charged && !localB.charged && !localB.ledgerId) {
+    merged.charged = serverB.charged;
+    merged.chargedAt = serverB.chargedAt;
+    merged.ledgerId = serverB.ledgerId;
+  }
+  return merged;
+}
+
 function mergeDataForSave(server, local) {
   const members = new Map();
   for (const m of server.members) {
     if (!sessionDeletes.memberIds.has(m.id)) members.set(m.id, m);
   }
   for (const m of local.members) {
-    if (!sessionDeletes.memberIds.has(m.id)) members.set(m.id, m);
+    if (!sessionDeletes.memberIds.has(m.id)) {
+      const prev = members.get(m.id);
+      members.set(m.id, prev ? mergeMemberRecord(prev, m) : m);
+    }
   }
 
   const bookings = new Map();
@@ -55,7 +102,10 @@ function mergeDataForSave(server, local) {
     if (!sessionDeletes.bookingIds.has(b.id)) bookings.set(b.id, b);
   }
   for (const b of local.bookings) {
-    if (!sessionDeletes.bookingIds.has(b.id)) bookings.set(b.id, b);
+    if (!sessionDeletes.bookingIds.has(b.id)) {
+      const prev = bookings.get(b.id);
+      bookings.set(b.id, prev ? mergeBookingRecord(prev, b) : b);
+    }
   }
 
   const fixedBookings = new Map();
@@ -124,6 +174,9 @@ function migrateData(data) {
       b.startHour = 8 + b.slotIndex;
       delete b.slotIndex;
     }
+    if (b.startHour != null) b.startHour = Number(b.startHour);
+    if (b.spanHours != null) b.spanHours = Number(b.spanHours) || 1;
+    if (b.price != null) b.price = Number(b.price);
     if (b.type == null) b.type = 'member';
     if (b.charged == null) {
       b.charged = b.type === 'walkin' || b.type === 'online';
@@ -363,24 +416,36 @@ function applyLedgerEntryToBalance(balance, entry) {
   return balance + entry.amount;
 }
 
-function buildMemberLedgerExportRows(member) {
-  const sorted = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
-  let balance = 0;
-  return sorted.map((l) => {
-    balance = applyLedgerEntryToBalance(balance, l);
-    return {
-      name: member.name,
-      type: getLedgerTypeLabel(l.type),
-      operationTime: formatDateTime(l.time),
-      rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
-      projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
-      projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
-      balance: balance.toFixed(2),
-    };
-  });
+function getLedgerEntryBookingSortTime(entry) {
+  if (entry.bookingRef) {
+    const [date, , startHourRaw] = entry.bookingRef.split('|');
+    const startHour = Number(startHourRaw);
+    if (date && Number.isFinite(startHour)) {
+      const t = new Date(
+        `${date}T${String(startHour).padStart(2, '0')}:00:00+08:00`
+      ).getTime();
+      if (Number.isFinite(t)) return t;
+    }
+  }
+  const dateMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
+  const hourMatch = entry.item?.match(/\b(\d{1,2}):00-\d{1,2}:00/);
+  if (dateMatch) {
+    const h = hourMatch ? Number(hourMatch[1]) : 0;
+    const t = new Date(
+      `${dateMatch[1]}T${String(h).padStart(2, '0')}:00:00+08:00`
+    ).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  return new Date(entry.time).getTime();
 }
 
-function buildMemberLedgerDisplayRows(member) {
+function compareLedgerEntryByBookingTimeDesc(a, b) {
+  const byBooking = getLedgerEntryBookingSortTime(b) - getLedgerEntryBookingSortTime(a);
+  if (byBooking !== 0) return byBooking;
+  return new Date(b.time) - new Date(a.time);
+}
+
+function buildMemberLedgerBalanceById(member) {
   const sorted = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
   let running = 0;
   const balanceById = new Map();
@@ -388,10 +453,31 @@ function buildMemberLedgerDisplayRows(member) {
     running = applyLedgerEntryToBalance(running, l);
     balanceById.set(l.id, running);
   }
-  return member.ledger.map((l) => ({
-    entry: l,
-    balanceAfter: balanceById.get(l.id) ?? member.balance,
+  return balanceById;
+}
+
+function buildMemberLedgerExportRows(member) {
+  const balanceById = buildMemberLedgerBalanceById(member);
+  const sorted = [...member.ledger].sort(compareLedgerEntryByBookingTimeDesc);
+  return sorted.map((l) => ({
+    name: member.name,
+    type: getLedgerTypeLabel(l.type),
+    operationTime: formatDateTime(l.time),
+    rechargeCol: l.type === 'recharge' ? `${l.item} ${l.amount}元` : '',
+    projectCol: l.type === 'consume' || l.type === 'refund' ? l.item : '',
+    projectAmount: l.type === 'consume' || l.type === 'refund' ? l.amount : '',
+    balance: (balanceById.get(l.id) ?? member.balance).toFixed(2),
   }));
+}
+
+function buildMemberLedgerDisplayRows(member) {
+  const balanceById = buildMemberLedgerBalanceById(member);
+  return [...member.ledger]
+    .map((l) => ({
+      entry: l,
+      balanceAfter: balanceById.get(l.id) ?? member.balance,
+    }))
+    .sort((a, b) => compareLedgerEntryByBookingTimeDesc(a.entry, b.entry));
 }
 
 function slotLabel(startHour) {
@@ -446,12 +532,20 @@ function getBusinessHoursText(dateStr) {
   return `${type}营业 ${String(start).padStart(2, '0')}:00-23:00`;
 }
 
+function normalizeHour(hour) {
+  const n = Number(hour);
+  return Number.isFinite(n) ? n : null;
+}
+
 function getSlotEndTime(dateStr, startHour) {
-  return new Date(`${dateStr}T${String(startHour + 1).padStart(2, '0')}:00:00`);
+  const h = normalizeHour(startHour);
+  if (h == null) return new Date(NaN);
+  return new Date(`${dateStr}T${String(h + 1).padStart(2, '0')}:00:00+08:00`);
 }
 
 function isSlotEnded(dateStr, startHour) {
-  return Date.now() >= getSlotEndTime(dateStr, startHour).getTime();
+  const end = getSlotEndTime(dateStr, startHour);
+  return Number.isFinite(end.getTime()) && Date.now() >= end.getTime();
 }
 
 // ========== 状态 ==========
@@ -549,8 +643,10 @@ function getBookingAtStart(date, courtId, startHour) {
 }
 
 function isBookingEnded(booking) {
+  const start = normalizeHour(booking.startHour);
   const span = getBookingSpan(booking);
-  return isSlotEnded(booking.date, booking.startHour + span - 1);
+  if (start == null) return false;
+  return isSlotEnded(booking.date, start + span - 1);
 }
 
 function isHourSelected(date, courtId, hour) {
@@ -1130,14 +1226,26 @@ function getBookingTypeLabel(booking) {
   return '会员订场';
 }
 
-function chargeBooking(booking) {
-  if (booking.charged || booking.type !== 'member') return null;
+function bookingNeedsChargeRepair(booking) {
+  if (booking.type !== 'member' || !isBookingEnded(booking)) return false;
+  if (!booking.charged) return true;
+  if (!booking.ledgerId) return true;
+  const member = getMember(booking.memberId);
+  if (!member) return true;
+  return !member.ledger?.some((l) => l.id === booking.ledgerId);
+}
+
+function chargeBooking(booking, options = {}) {
+  if (booking.type !== 'member') return null;
+  if (booking.charged && !bookingNeedsChargeRepair(booking)) return null;
+  if (booking.charged) {
+    booking.charged = false;
+    booking.chargedAt = null;
+    booking.ledgerId = null;
+  }
 
   const member = getMember(booking.memberId);
   if (!member) {
-    booking.charged = true;
-    booking.chargedAt = new Date().toISOString();
-    saveData(data);
     return null;
   }
 
@@ -1160,18 +1268,20 @@ function chargeBooking(booking) {
   booking.chargedAt = now;
   booking.ledgerId = ledgerEntry.id;
 
-  saveData(data);
+  if (!options.deferSave) saveData(data);
   return { member, ledgerEntry, booking };
 }
 
 function processDueCharges() {
+  const due = data.bookings.filter((b) => bookingNeedsChargeRepair(b));
+  if (!due.length) return 0;
+
   const receipts = [];
-  data.bookings
-    .filter((b) => b.type === 'member' && !b.charged && isBookingEnded(b))
-    .forEach((b) => {
-      const result = chargeBooking(b);
-      if (result) receipts.push(result);
-    });
+  due.forEach((b) => {
+    const result = chargeBooking(b, { deferSave: true });
+    if (result) receipts.push(result);
+  });
+  saveData(data);
 
   if (receipts.length > 0) {
     renderBookingTable();
@@ -1232,7 +1342,7 @@ function getMemberDayConsumeEntries(member, dateStr) {
       const d = getLedgerEntryBookingDate(l) || l.time?.slice(0, 10);
       return d === dateStr;
     })
-    .sort((a, b) => new Date(a.time) - new Date(b.time));
+    .sort(compareLedgerEntryByBookingTimeDesc);
 }
 
 function getMemberDayConsumeTotal(member, dateStr) {
@@ -2431,6 +2541,27 @@ function initEvents() {
   });
   document.getElementById('income-start').addEventListener('change', renderIncomeStats);
   document.getElementById('income-end').addEventListener('change', renderIncomeStats);
+  document.getElementById('process-charges-btn').addEventListener('click', async () => {
+    await refreshDataFromServer();
+    const n = processDueCharges();
+    if (n > 0) {
+      showToast(`已补扣 ${n} 笔会员订场`);
+      return;
+    }
+    const date = document.getElementById('booking-date').value;
+    const pending = data.bookings.filter(
+      (b) =>
+        b.type === 'member' &&
+        b.date === date &&
+        isBookingEnded(b) &&
+        bookingNeedsChargeRepair(b)
+    );
+    showToast(
+      pending.length
+        ? `${date} 仍有 ${pending.length} 笔待扣费，请刷新后重试或检查会员是否存在`
+        : '暂无需要扣费的订场'
+    );
+  });
   document.getElementById('export-booking').addEventListener('click', exportBooking);
   document.getElementById('export-consumption-report').addEventListener('click', exportConsumptionReport);
 
@@ -2841,6 +2972,8 @@ function init() {
   renderFixedBookingTable();
   renderDailyPriceTable();
   renderMemberList();
+
+  processDueCharges();
 
   chargeCheckTimer = setInterval(() => {
     processDueCharges();
