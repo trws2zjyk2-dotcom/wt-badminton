@@ -1051,6 +1051,35 @@ function rechargeMember(id, amount, item, bonus = 0) {
   return true;
 }
 
+function findBookingForLedgerEntry(entry, memberId) {
+  if (entry.type !== 'consume') return null;
+  if (entry.bookingRef) {
+    const hit = data.bookings.find(
+      (b) => getBookingKey(b.date, b.courtId, b.startHour) === entry.bookingRef
+    );
+    if (hit) return hit;
+  }
+  const byLedgerId = data.bookings.find((b) => b.ledgerId === entry.id);
+  if (byLedgerId) return byLedgerId;
+
+  const item = entry.item || '';
+  const slotMatch = item.match(/(\d{4}-\d{2}-\d{2})\s+(\S+)\s+(\d{1,2}):00-/);
+  if (!slotMatch) return null;
+  const date = slotMatch[1];
+  const courtToken = slotMatch[2];
+  const hour = Number(slotMatch[3]);
+  const court = COURTS.find((c) => c.name === courtToken || c.id === courtToken);
+  if (!court || !Number.isFinite(hour)) return null;
+  return data.bookings.find(
+    (b) =>
+      b.type === 'member' &&
+      b.memberId === memberId &&
+      b.date === date &&
+      b.courtId === court.id &&
+      Number(b.startHour) === hour
+  );
+}
+
 function deleteLedgerEntry(memberId, ledgerId) {
   const m = getMember(memberId);
   if (!m) return { ok: false, msg: '会员不存在' };
@@ -1059,15 +1088,12 @@ function deleteLedgerEntry(memberId, ledgerId) {
 
   if (entry.type === 'consume') {
     m.balance += entry.amount;
-    if (entry.bookingRef) {
-      const booking = data.bookings.find(
-        (b) => getBookingKey(b.date, b.courtId, b.startHour) === entry.bookingRef
-      );
-      if (booking) {
-        booking.charged = false;
-        booking.chargedAt = null;
-        booking.ledgerId = null;
-      }
+    const booking = findBookingForLedgerEntry(entry, memberId);
+    if (booking) {
+      booking.charged = false;
+      booking.chargedAt = null;
+      booking.ledgerId = null;
+      booking.skipAutoCharge = true;
     }
   } else if (entry.type === 'recharge' || entry.type === 'refund') {
     m.balance -= entry.amount;
@@ -1206,6 +1232,7 @@ function getBookingTypeLabel(booking) {
 
 function bookingNeedsChargeRepair(booking) {
   if (booking.type !== 'member' || !isBookingEnded(booking)) return false;
+  if (booking.skipAutoCharge) return false;
   if (!booking.charged) return true;
   if (!booking.ledgerId) return true;
   const member = getMember(booking.memberId);

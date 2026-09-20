@@ -69,6 +69,7 @@ function normalizeBookings(data) {
 
 function needsChargeRepair(data, booking) {
   if (booking.type !== 'member' || !isBookingEnded(booking)) return false;
+  if (booking.skipAutoCharge) return false;
   if (!booking.charged) return true;
   if (!booking.ledgerId) return true;
   const member = data.members.find((m) => m.id === booking.memberId);
