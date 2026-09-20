@@ -720,6 +720,13 @@ body {
   line-height: 1.6;
 }
 
+.receipt-day-total {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  border-bottom: none;
+}
+
 .receipt-modal .modal-actions {
   padding: 0 24px 24px;
 }

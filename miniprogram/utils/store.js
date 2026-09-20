@@ -578,8 +578,20 @@ function buildReceiptText(member, entry) {
 function getMemberDetail(id) {
   const m = getMember(id);
   if (!m) return null;
-  const consumeTotal = m.ledger.filter((l) => l.type === 'consume').reduce((s, l) => s + l.amount, 0);
-  const rechargeTotal = m.ledger.filter((l) => l.type === 'recharge').reduce((s, l) => s + l.amount, 0);
+  const consumeTotal = m.ledger.reduce((total, l) => {
+    if (l.type === 'consume') return total + l.amount;
+    if (l.type === 'refund') return total - l.amount;
+    return total;
+  }, 0);
+  const rechargeTotal = m.ledger
+    .filter(
+      (l) =>
+        l.type === 'recharge' &&
+        l.item !== '充值赠送' &&
+        l.item !== '初始充值' &&
+        !(l.item && l.item.includes('取消订场退款'))
+    )
+    .reduce((s, l) => s + l.amount, 0);
   return Object.assign({}, m, {
     balanceText: formatMoney(m.balance),
     priceTableLabel: getPriceTableLabel(m.priceTable),

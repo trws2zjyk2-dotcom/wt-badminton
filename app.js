@@ -337,8 +337,25 @@ function getLedgerTypeLabel(type) {
   return '充值';
 }
 
+function isPaidRechargeEntry(entry) {
+  return (
+    entry.type === 'recharge' &&
+    entry.item !== '充值赠送' &&
+    entry.item !== '初始充值' &&
+    !entry.item?.includes('取消订场退款')
+  );
+}
+
 function sumMemberRecharge(ledger) {
-  return ledger.filter((l) => l.type === 'recharge').reduce((s, l) => s + l.amount, 0);
+  return ledger.filter(isPaidRechargeEntry).reduce((s, l) => s + l.amount, 0);
+}
+
+function sumMemberConsume(ledger) {
+  return ledger.reduce((total, entry) => {
+    if (entry.type === 'consume') return total + Number(entry.amount);
+    if (entry.type === 'refund') return total - Number(entry.amount);
+    return total;
+  }, 0);
 }
 
 function applyLedgerEntryToBalance(balance, entry) {
@@ -361,6 +378,20 @@ function buildMemberLedgerExportRows(member) {
       balance: balance.toFixed(2),
     };
   });
+}
+
+function buildMemberLedgerDisplayRows(member) {
+  const sorted = [...member.ledger].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let running = 0;
+  const balanceById = new Map();
+  for (const l of sorted) {
+    running = applyLedgerEntryToBalance(running, l);
+    balanceById.set(l.id, running);
+  }
+  return member.ledger.map((l) => ({
+    entry: l,
+    balanceAfter: balanceById.get(l.id) ?? member.balance,
+  }));
 }
 
 function slotLabel(startHour) {
@@ -1193,52 +1224,62 @@ function getLedgerEntryBookingDate(entry) {
   return entry.time?.slice(0, 10) || null;
 }
 
-function getMemberBookingsOnDate(memberId, dateStr) {
-  if (!memberId || !dateStr) return [];
-  return data.bookings
-    .filter((b) => b.type === 'member' && b.memberId === memberId && b.date === dateStr)
-    .sort((a, b) => a.startHour - b.startHour || a.courtId.localeCompare(b.courtId));
+function getMemberDayConsumeEntries(member, dateStr) {
+  if (!member || !dateStr) return [];
+  return member.ledger
+    .filter((l) => {
+      if (l.type !== 'consume') return false;
+      const d = getLedgerEntryBookingDate(l) || l.time?.slice(0, 10);
+      return d === dateStr;
+    })
+    .sort((a, b) => new Date(a.time) - new Date(b.time));
 }
 
-function formatMemberDayBookingsLines(memberId, dateStr) {
-  const list = getMemberBookingsOnDate(memberId, dateStr);
-  if (!list.length) return [];
-  return list.map((b) => {
-    const court = COURTS.find((c) => c.id === b.courtId);
-    const status = b.charged ? '已扣费' : '待扣费';
-    const note = b.note?.trim() ? ` · ${b.note.trim()}` : '';
-    return `${court?.name || b.courtId} ${slotRangeLabel(b.startHour, getBookingSpan(b))} ${formatMoney(b.price)}（${status}）${note}`;
-  });
+function getMemberDayConsumeTotal(member, dateStr) {
+  return getMemberDayConsumeEntries(member, dateStr).reduce((s, l) => s + l.amount, 0);
 }
 
 function buildReceiptText(member, entry) {
-  const lines = [
-    '【羽毛球馆消费清单】',
-    `会员名称：${member.name}`,
-    `消费时间：${formatDateTime(entry.time)}`,
-    `消费项目：${entry.item}`,
-    `消费金额：${formatMoney(entry.amount)}`,
-  ];
+  const lines = ['【羽毛球馆消费清单】', `会员名称：${member.name}`, `消费时间：${formatDateTime(entry.time)}`];
   const bookingDate = getLedgerEntryBookingDate(entry);
-  const dayLines = formatMemberDayBookingsLines(member.id, bookingDate);
-  if (dayLines.length) {
-    lines.push('', `【${formatBookingDate(bookingDate)} 当日全部订场】`);
-    dayLines.forEach((line) => lines.push(`· ${line}`));
+  const dayItems = getMemberDayConsumeEntries(member, bookingDate);
+  if (dayItems.length) {
+    lines.push('', `【${formatBookingDate(bookingDate)} 当日消费明细】`);
+    dayItems.forEach((l) => lines.push(`· ${l.item} · ${formatMoney(l.amount)}`));
+    lines.push(`消费总金额：${formatMoney(getMemberDayConsumeTotal(member, bookingDate))}`);
+  } else if (entry.type === 'consume') {
+    lines.push(`消费项目：${entry.item}`, `消费金额：${formatMoney(entry.amount)}`);
   }
   lines.push(`账户余额：${formatBalance(member.balance)}`, '感谢您的光临！');
   return lines.join('\n');
 }
 
-function buildReceiptDayBookingsHtml(member, entry) {
+function buildReceiptDayConsumeHtml(member, entry) {
   const bookingDate = getLedgerEntryBookingDate(entry);
-  const dayLines = formatMemberDayBookingsLines(member.id, bookingDate);
-  if (!dayLines.length) return '';
+  const dayItems = getMemberDayConsumeEntries(member, bookingDate);
+  if (!dayItems.length) {
+    if (entry.type !== 'consume') return '';
+    return `
+      <div class="receipt-day-bookings">
+        <div class="receipt-subheader">消费项目</div>
+        <ul class="receipt-day-list"><li>${entry.item} · ${formatMoney(entry.amount)}</li></ul>
+        <div class="receipt-row receipt-day-total">
+          <span>消费总金额</span>
+          <strong class="receipt-amount">${formatMoney(entry.amount)}</strong>
+        </div>
+      </div>`;
+  }
+  const total = getMemberDayConsumeTotal(member, bookingDate);
   return `
     <div class="receipt-day-bookings">
-      <div class="receipt-subheader">${formatBookingDate(bookingDate)} 当日全部订场</div>
+      <div class="receipt-subheader">${formatBookingDate(bookingDate)} 当日消费明细</div>
       <ul class="receipt-day-list">
-        ${dayLines.map((line) => `<li>${line}</li>`).join('')}
+        ${dayItems.map((l) => `<li>${l.item} · ${formatMoney(l.amount)}</li>`).join('')}
       </ul>
+      <div class="receipt-row receipt-day-total">
+        <span>消费总金额</span>
+        <strong class="receipt-amount">${formatMoney(total)}</strong>
+      </div>
     </div>`;
 }
 
@@ -1248,9 +1289,7 @@ function showMemberReceipt(member, entry) {
     <div class="receipt-header">🏸 消费清单</div>
     <div class="receipt-row"><span>会员名称</span><strong>${member.name}</strong></div>
     <div class="receipt-row"><span>消费时间</span><strong>${formatDateTime(entry.time)}</strong></div>
-    <div class="receipt-row"><span>消费项目</span><strong>${entry.item}</strong></div>
-    <div class="receipt-row"><span>消费金额</span><strong class="receipt-amount">${formatMoney(entry.amount)}</strong></div>
-    ${buildReceiptDayBookingsHtml(member, entry)}
+    ${buildReceiptDayConsumeHtml(member, entry)}
     <div class="receipt-row receipt-balance"><span>账户余额</span><strong>${formatBalance(member.balance)}</strong></div>
     <p class="receipt-footer">请核对以上信息，如有疑问请联系前台。</p>
   `;
@@ -1912,23 +1951,25 @@ function renderMemberDetail(id) {
     return;
   }
 
-  const ledgerRows = m.ledger.length
-    ? m.ledger
+  const displayRows = buildMemberLedgerDisplayRows(m);
+  const ledgerRows = displayRows.length
+    ? displayRows
         .map(
-          (l) => `
+          ({ entry: l, balanceAfter }) => `
       <tr>
         <td class="type-${l.type}">${getLedgerTypeLabel(l.type)}</td>
         <td>${l.item}</td>
         <td class="type-${l.type}">${l.type === 'consume' ? '-' : '+'}${formatMoney(l.amount)}</td>
+        <td>${formatBalance(balanceAfter)}</td>
+        <td>${formatDateTime(l.time)}</td>
         <td class="ledger-actions">
           ${l.type === 'consume' ? `<button class="btn btn-secondary btn-sm ledger-receipt" data-ledger-id="${l.id}">发送清单</button>` : ''}
           <button class="btn btn-danger btn-sm ledger-delete" data-ledger-id="${l.id}">删除</button>
         </td>
-        <td>${formatDateTime(l.time)}</td>
       </tr>`
         )
         .join('')
-    : '<tr><td colspan="5" style="text-align:center;color:#64748b">暂无记录</td></tr>';
+    : '<tr><td colspan="6" style="text-align:center;color:#64748b">暂无记录</td></tr>';
 
   panel.innerHTML = `
     <div class="detail-header">
@@ -1954,7 +1995,7 @@ function renderMemberDetail(id) {
       </div>
       <div class="info-card">
         <div class="label">累计消费</div>
-        <div class="value">${formatMoney(m.ledger.filter((l) => l.type === 'consume').reduce((s, l) => s + l.amount, 0))}</div>
+        <div class="value">${formatMoney(sumMemberConsume(m.ledger))}</div>
       </div>
       <div class="info-card">
         <div class="label">累计充值</div>
@@ -1969,8 +2010,9 @@ function renderMemberDetail(id) {
             <th>类型</th>
             <th>项目</th>
             <th>金额</th>
-            <th>操作</th>
+            <th>余额</th>
             <th>操作时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>${ledgerRows}</tbody>
