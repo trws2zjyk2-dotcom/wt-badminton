@@ -28,8 +28,17 @@ fetch Dockerfile
 fetch docker-compose.run.yml
 fetch package.json
 
-echo ">>> 重建并启动容器（约 1～3 分钟）..."
-sudo docker compose -f docker-compose.run.yml up -d --build
+echo ">>> 校验 app.js 是否为新版本（约 10 万字节）..."
+BYTES=$(wc -c < app.js | tr -d ' ')
+echo "  app.js 大小: ${BYTES} 字节"
+if [ "$BYTES" -lt 100000 ]; then
+  echo "❌ app.js 偏小，可能未从 GitHub 拉取成功，请检查网络后重试"
+  exit 1
+fi
+
+echo ">>> 重建并启动容器（约 1～3 分钟，不使用旧镜像缓存）..."
+sudo docker compose -f docker-compose.run.yml build --no-cache app
+sudo docker compose -f docker-compose.run.yml up -d
 
 echo ""
 echo "=========================================="

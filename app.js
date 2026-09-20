@@ -1323,12 +1323,14 @@ function getLedgerEntryBookingDateTime(entry) {
       return `${booking.date}T00:00:00+08:00`;
     }
   }
-  const slotMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})\s+\S+\s+(\d{1,2}):\d{2}-/);
-  if (slotMatch) {
-    return `${slotMatch[1]}T${String(Number(slotMatch[2])).padStart(2, '0')}:00:00+08:00`;
+  const item = entry.item || '';
+  const dateMatch = item.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    const afterDate = item.slice(item.indexOf(dateMatch[1]) + dateMatch[1].length);
+    const hourMatch = afterDate.match(/(\d{1,2}):00-/);
+    const hour = hourMatch ? Number(hourMatch[1]) : 0;
+    return `${dateMatch[1]}T${String(hour).padStart(2, '0')}:00:00+08:00`;
   }
-  const dateMatch = entry.item?.match(/(\d{4}-\d{2}-\d{2})/);
-  if (dateMatch) return `${dateMatch[1]}T00:00:00+08:00`;
   return entry.time || null;
 }
 
