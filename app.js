@@ -33,12 +33,19 @@ const sessionDeletes = {
   memberIds: new Set(),
   bookingIds: new Set(),
   fixedBookingIds: new Set(),
+  /** `${memberId}|${ledgerId}` 本会话内删除的清单项，合并时不再从服务器恢复 */
+  ledgerEntryKeys: new Set(),
 };
+
+function ledgerEntryKey(memberId, ledgerId) {
+  return `${memberId}|${ledgerId}`;
+}
 
 function resetSessionDeletes() {
   sessionDeletes.memberIds.clear();
   sessionDeletes.bookingIds.clear();
   sessionDeletes.fixedBookingIds.clear();
+  sessionDeletes.ledgerEntryKeys.clear();
 }
 
 function computeBalanceFromLedger(ledger) {
@@ -48,9 +55,26 @@ function computeBalanceFromLedger(ledger) {
   return Math.round(balance * 100) / 100;
 }
 
-function mergeMemberRecord(serverM, localM) {
+function mergeMemberRecord(serverM, localM, localBookings) {
   const ledgerById = new Map();
-  for (const l of serverM.ledger || []) ledgerById.set(l.id, l);
+  const memberId = localM.id ?? serverM.id;
+  const skipChargeRefs = new Set();
+  for (const b of localBookings || []) {
+    if (b.memberId === memberId && b.skipAutoCharge) {
+      skipChargeRefs.add(getBookingKey(b.date, b.courtId, b.startHour));
+    }
+  }
+  for (const l of serverM.ledger || []) {
+    if (sessionDeletes.ledgerEntryKeys.has(ledgerEntryKey(memberId, l.id))) continue;
+    if (
+      l.type === 'consume' &&
+      l.bookingRef &&
+      skipChargeRefs.has(l.bookingRef)
+    ) {
+      continue;
+    }
+    ledgerById.set(l.id, l);
+  }
   for (const l of localM.ledger || []) ledgerById.set(l.id, l);
   const ledger = Array.from(ledgerById.values()).sort(
     (a, b) => new Date(b.time) - new Date(a.time)
@@ -67,6 +91,13 @@ function mergeMemberRecord(serverM, localM) {
 
 function mergeBookingRecord(serverB, localB) {
   const merged = { ...serverB, ...localB };
+  if (localB.skipAutoCharge || serverB.skipAutoCharge) {
+    merged.skipAutoCharge = true;
+    merged.charged = false;
+    merged.chargedAt = null;
+    merged.ledgerId = null;
+    return merged;
+  }
   const serverCharged = serverB.charged && serverB.ledgerId;
   const localCharged = localB.charged && localB.ledgerId;
   if (serverCharged && !localCharged) {
@@ -93,7 +124,7 @@ function mergeDataForSave(server, local) {
   for (const m of local.members) {
     if (!sessionDeletes.memberIds.has(m.id)) {
       const prev = members.get(m.id);
-      members.set(m.id, prev ? mergeMemberRecord(prev, m) : m);
+      members.set(m.id, prev ? mergeMemberRecord(prev, m, local.bookings) : m);
     }
   }
 
@@ -190,7 +221,7 @@ async function saveData(payload) {
   if (USE_SERVER_API) {
     const run = async () => {
       try {
-        const latestRes = await fetch('/api/data', { credentials: 'include' });
+        const latestRes = await fetch('/api/data?skipCharge=1', { credentials: 'include' });
         if (latestRes.status === 401) {
           window.location.href = '/login.html';
           return;
@@ -1086,21 +1117,39 @@ function deleteLedgerEntry(memberId, ledgerId) {
   const entry = m.ledger.find((l) => l.id === ledgerId);
   if (!entry) return { ok: false, msg: '记录不存在' };
 
+  const removeIds = new Set([ledgerId]);
+
   if (entry.type === 'consume') {
     m.balance += entry.amount;
     const booking = findBookingForLedgerEntry(entry, memberId);
+    let bookingRef = entry.bookingRef;
     if (booking) {
+      bookingRef = getBookingKey(booking.date, booking.courtId, booking.startHour);
       booking.charged = false;
       booking.chargedAt = null;
       booking.ledgerId = null;
       booking.skipAutoCharge = true;
     }
+    for (const l of m.ledger) {
+      if (l.id === ledgerId || l.type !== 'consume') continue;
+      const sameRef = bookingRef && l.bookingRef === bookingRef;
+      const sameItem =
+        !bookingRef &&
+        l.item === entry.item &&
+        Number(l.amount) === Number(entry.amount);
+      if (sameRef || sameItem) {
+        removeIds.add(l.id);
+        if (l.id !== ledgerId) m.balance += l.amount;
+      }
+    }
   } else if (entry.type === 'recharge' || entry.type === 'refund') {
     m.balance -= entry.amount;
   }
 
-  m.ledger = m.ledger.filter((l) => l.id !== ledgerId);
-  saveData(data);
+  for (const id of removeIds) {
+    sessionDeletes.ledgerEntryKeys.add(ledgerEntryKey(memberId, id));
+  }
+  m.ledger = m.ledger.filter((l) => !removeIds.has(l.id));
   return { ok: true };
 }
 
@@ -1242,6 +1291,7 @@ function bookingNeedsChargeRepair(booking) {
 
 function chargeBooking(booking, options = {}) {
   if (booking.type !== 'member') return null;
+  if (booking.skipAutoCharge) return null;
   if (booking.charged && !bookingNeedsChargeRepair(booking)) return null;
   if (booking.charged) {
     booking.charged = false;
@@ -2226,20 +2276,26 @@ function renderMemberDetail(id) {
   });
 
   panel.querySelectorAll('.ledger-delete').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const ledgerId = btn.dataset.ledgerId;
       const entry = m.ledger.find((l) => l.id === ledgerId);
       const action = entry.type === 'consume' ? '消费' : entry.type === 'refund' ? '退款' : '充值';
       if (confirm(`确定删除该${action}记录？余额将相应调整。`)) {
         const result = deleteLedgerEntry(id, ledgerId);
-        if (result.ok) {
-          renderMemberDetail(id);
-          renderMemberList(document.getElementById('member-search').value);
-          renderBookingTable();
-          showToast('记录已删除');
-        } else {
+        if (!result.ok) {
           showToast(result.msg);
+          return;
         }
+        try {
+          await saveData(data);
+        } catch {
+          showToast('保存失败，请重试');
+          return;
+        }
+        renderMemberDetail(id);
+        renderMemberList(document.getElementById('member-search').value);
+        renderBookingTable();
+        showToast('记录已删除');
       }
     });
   });

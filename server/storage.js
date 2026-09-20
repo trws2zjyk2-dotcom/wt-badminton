@@ -58,17 +58,21 @@ async function saveToSupabase(data) {
   if (!res.ok) throw new Error(`Supabase 保存失败: ${res.status}`);
 }
 
-async function loadServerData() {
+async function loadServerData(options = {}) {
+  const runCharge = options.runCharge !== false;
   const data =
     config.SUPABASE_URL && config.SUPABASE_KEY ? await loadFromSupabase() : loadFromFile();
+  if (!runCharge) return data;
   const charged = processDueCharges(data);
-  if (charged > 0) await saveServerData(data);
+  if (charged > 0) await saveServerData(data, { runCharge: false });
   return data;
 }
 
-async function saveServerData(data) {
+async function saveServerData(data, options = {}) {
   const normalized = normalizeData(data);
-  processDueCharges(normalized);
+  if (options.runCharge !== false) {
+    processDueCharges(normalized);
+  }
   if (config.SUPABASE_URL && config.SUPABASE_KEY) {
     await saveToSupabase(normalized);
     return;

@@ -68,7 +68,9 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/data', requireAuth, async (req, res) => {
   try {
-    res.json(await loadServerData());
+    const skipCharge =
+      req.query.skipCharge === '1' || req.query.skipCharge === 'true';
+    res.json(await loadServerData({ runCharge: !skipCharge }));
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, msg: '数据加载失败' });
