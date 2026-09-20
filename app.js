@@ -399,6 +399,10 @@ function isPaidRechargeEntry(entry) {
   );
 }
 
+function isInitialRechargeEntry(entry) {
+  return entry.type === 'recharge' && entry.item === '初始充值';
+}
+
 function sumMemberRecharge(ledger) {
   return ledger.filter(isPaidRechargeEntry).reduce((s, l) => s + l.amount, 0);
 }
@@ -1331,20 +1335,31 @@ function getLedgerEntryBookingDateTime(entry) {
     const hour = hourMatch ? Number(hourMatch[1]) : 0;
     return `${dateMatch[1]}T${String(hour).padStart(2, '0')}:00:00+08:00`;
   }
-  return entry.time || null;
+  return null;
 }
 
 function getLedgerEntryBookingSortTime(entry) {
   const dateTime = getLedgerEntryBookingDateTime(entry);
+  if (!dateTime) return null;
   const ms = new Date(dateTime).getTime();
-  if (Number.isFinite(ms)) return ms;
-  const op = new Date(entry.time).getTime();
-  return Number.isFinite(op) ? op : 0;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** 清单展示排序：消费/退款用订场时间，充值用操作时间（初始充值单独置底） */
+function getLedgerDisplaySortTime(entry) {
+  if (entry.type === 'recharge' && !isInitialRechargeEntry(entry)) {
+    const ms = new Date(entry.time).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  const bookingMs = getLedgerEntryBookingSortTime(entry);
+  return bookingMs != null ? bookingMs : 0;
 }
 
 function compareLedgerByBookingTimeDesc(a, b) {
-  const diff = getLedgerEntryBookingSortTime(b) - getLedgerEntryBookingSortTime(a);
-  return diff !== 0 ? diff : new Date(b.time) - new Date(a.time);
+  const initA = isInitialRechargeEntry(a);
+  const initB = isInitialRechargeEntry(b);
+  if (initA !== initB) return initA ? 1 : -1;
+  return getLedgerDisplaySortTime(b) - getLedgerDisplaySortTime(a);
 }
 
 function getMemberDayConsumeEntries(member, dateStr) {

@@ -612,13 +612,27 @@ function getLedgerEntryBookingSortTime(entry, bookings) {
     ).getTime();
     if (Number.isFinite(ms)) return ms;
   }
-  const op = new Date(entry.time).getTime();
-  return Number.isFinite(op) ? op : 0;
+  return null;
+}
+
+function isInitialRechargeEntry(entry) {
+  return entry.type === 'recharge' && entry.item === '初始充值';
+}
+
+function getLedgerDisplaySortTime(entry, bookings) {
+  if (entry.type === 'recharge' && !isInitialRechargeEntry(entry)) {
+    const ms = new Date(entry.time).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  const bookingMs = getLedgerEntryBookingSortTime(entry, bookings);
+  return bookingMs != null ? bookingMs : 0;
 }
 
 function compareLedgerByBookingTimeDesc(a, b, bookings) {
-  const diff = getLedgerEntryBookingSortTime(b, bookings) - getLedgerEntryBookingSortTime(a, bookings);
-  return diff !== 0 ? diff : new Date(b.time) - new Date(a.time);
+  const initA = isInitialRechargeEntry(a);
+  const initB = isInitialRechargeEntry(b);
+  if (initA !== initB) return initA ? 1 : -1;
+  return getLedgerDisplaySortTime(b, bookings) - getLedgerDisplaySortTime(a, bookings);
 }
 
 function getMemberDetail(id) {
